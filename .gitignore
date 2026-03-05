@@ -1,18 +1,23 @@
-# Arquivos de sistema e IDEs
-.DS_Store
-.idea/
-.vscode/
-*.swp
-*.log
-
-# Build e Dependências (Genérico)
-dist/
+# Gradle
+.gradle/
 build/
 bin/
-obj/
-node_modules/
-vendor/
-__pycache__/
-*.egg-info/
+out/
+
+# IDEs
+.idea/
+*.iml
+*.iws
+.project
+.settings/
+.classpath
+.vscode/
+
+# Logs and OS
+*.log
+.DS_Store
+*.swp
+
+# Local Env
 .env
 .env.local
