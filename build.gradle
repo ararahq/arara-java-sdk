@@ -1,0 +1,118 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'jacoco'
+}
+
+group = project.araraSdkGroup
+version = project.araraSdkVersion
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(Integer.parseInt(project.javaVersion))
+    }
+    withSourcesJar()
+    withJavadocJar()
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    api "com.squareup.okhttp3:okhttp:${project.okhttpVersion}"
+    
+    api platform("com.fasterxml.jackson:jackson-bom:${project.jacksonBomVersion}")
+    api "com.fasterxml.jackson.core:jackson-databind"
+    api "com.fasterxml.jackson.datatype:jackson-datatype-jsr310"
+
+    api "org.slf4j:slf4j-api:${project.slf4jVersion}"
+
+    compileOnly "org.projectlombok:lombok:${project.lombokVersion}"
+    annotationProcessor "org.projectlombok:lombok:${project.lombokVersion}"
+
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    testImplementation 'org.mockito:mockito-core:5.7.0'
+    testImplementation 'org.mockito:mockito-junit-jupiter:5.7.0'
+    testImplementation "com.squareup.okhttp3:mockwebserver:${project.okhttpVersion}"
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+// Ensures Lombok processes annotations BEFORE Javadoc
+tasks.javadoc {
+    dependsOn tasks.compileJava
+    options.addBooleanOption('Xdoclint:none', true)
+    failOnError = false
+    classpath = sourceSets.main.output + sourceSets.main.compileClasspath
+}
+
+// JaCoCo test coverage configuration
+jacoco {
+    toolVersion = project.jacocoVersion
+}
+
+tasks.jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+tasks.jacocoTestCoverageVerification {
+    violationRules {
+        rule {
+            limit {
+                minimum = 0.80.toBigDecimal()
+            }
+        }
+    }
+}
+
+check.dependsOn jacocoTestCoverageVerification
+
+// Maven publication configuration
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            
+            pom {
+                name = 'Arara Java SDK'
+                description = 'Official SDK for integrating with the Arara platform'
+                url = 'https://github.com/ararahq/arara-java-sdk'
+                licenses {
+                    license {
+                        name = 'MIT License'
+                        url = 'https://opensource.org/licenses/MIT'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'ararahq'
+                        name = 'Arara HQ'
+                        email = 'suporte@ararahq.com'
+                    }
+                }
+            }
+        }
+    }
+    repositories {
+        mavenLocal()
+    }
+}
+
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+    }
+}
