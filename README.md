@@ -36,7 +36,7 @@ Adicione a dependência ao seu `build.gradle`:
 
 ```gradle
 dependencies {
-    implementation 'com.ararahq:arara-java-sdk:0.0.1-SNAPSHOT'
+    implementation 'com.ararahq:arara-java-sdk:1.8.0'
 }
 ```
 
@@ -48,7 +48,7 @@ Adicione ao seu `pom.xml`:
 <dependency>
     <groupId>com.ararahq</groupId>
     <artifactId>arara-java-sdk</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>1.8.0</version>
 </dependency>
 ```
 
