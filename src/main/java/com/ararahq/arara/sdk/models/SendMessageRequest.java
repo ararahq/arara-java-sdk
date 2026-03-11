@@ -47,4 +47,8 @@ public class SendMessageRequest {
 
     /** Optional URL for Smart Links */
     String smartLinkUrl;
+
+    /** Optional media URL (header) */
+    @JsonProperty("media_url")
+    String mediaUrl;
 }

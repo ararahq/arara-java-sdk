@@ -76,6 +76,7 @@ import com.ararahq.arara.sdk.models.MessageResponse;
 SendMessageRequest request = SendMessageRequest.builder()
     .receiver("whatsapp:+5511999998888")
     .body("Olá! Esta é uma mensagem de teste.")
+    .mediaUrl("https://ararahq.com/l/FtFmja") // Opcional: Imagem/PDF
     .build();
 
 MessageResponse response = arara.getMessages().send(request);
@@ -90,6 +91,7 @@ SendMessageRequest request = SendMessageRequest.builder()
     .receiver("whatsapp:+5511999998888")
     .templateName("hello_world")
     .templateVariables(Arrays.asList("João", "Silva"))
+    .scheduledAt(Instant.parse("2024-12-25T10:00:00Z")) // Opcional: Agendamento
     .build();
 
 MessageResponse response = arara.getMessages().send(request);

@@ -2,6 +2,7 @@ plugins {
     id 'java-library'
     id 'maven-publish'
     id 'jacoco'
+    id "io.freefair.lombok" version "8.6"
 }
 
 group = project.araraSdkGroup
@@ -47,8 +48,14 @@ tasks.withType(JavaCompile).configureEach {
 // Ensures Lombok processes annotations BEFORE Javadoc
 tasks.javadoc {
     dependsOn tasks.compileJava
-    options.addBooleanOption('Xdoclint:none', true)
+    if (JavaVersion.current().isJava9Compatible()) {
+        options.addBooleanOption('Xdoclint:none', true)
+    }
     failOnError = false
+    options.encoding = 'UTF-8'
+    options.memberLevel = JavadocMemberLevel.PUBLIC
+    options.addStringOption('Xmaxerrs', '0') // Diminui o ruído visual no terminal
+    options.addStringOption('Xmaxwarns', '0')
     classpath = sourceSets.main.output + sourceSets.main.compileClasspath
 }
 
@@ -105,6 +112,14 @@ publishing {
     }
     repositories {
         mavenLocal()
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/ararahq/arara-java-sdk")
+            credentials {
+                username = System.getenv("GITHUB_ACTOR") ?: project.findProperty("gpr.user")
+                password = System.getenv("GITHUB_TOKEN") ?: project.findProperty("gpr.key")
+            }
+        }
     }
 }
 
