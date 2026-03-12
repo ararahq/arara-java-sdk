@@ -48,7 +48,10 @@ public class SendMessageRequest {
     /** Optional URL for Smart Links */
     String smartLinkUrl;
 
-    /** Optional media URL (header) */
+    /**
+     * @deprecated Use 'templateVariables' array positionally (header in first position)
+     */
+    @Deprecated
     @JsonProperty("media_url")
     String mediaUrl;
 }
