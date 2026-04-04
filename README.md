@@ -1,8 +1,9 @@
 # Arara Java SDK
 
+[![Maven Central](https://img.shields.io/maven-central/v/com.ararahq/arara-java-sdk)](https://central.sonatype.com/artifact/com.ararahq/arara-java-sdk)
 [![Java](https://img.shields.io/badge/Java-17%2B-orange)](https://www.java.com/)
-[![Gradle](https://img.shields.io/badge/Gradle-9.0-blue)](https://gradle.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![Docs](https://img.shields.io/badge/Docs-docs.ararahq.com-orange)](https://docs.ararahq.com)
 
 SDK oficial em Java para integração com a **Plataforma WhatsApp Business Arara**.
 
