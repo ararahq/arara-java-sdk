@@ -4,7 +4,7 @@ import com.ararahq.arara.sdk.config.AraraConfig;
 import com.ararahq.arara.sdk.exceptions.AraraApiException;
 import com.ararahq.arara.sdk.exceptions.AraraAuthException;
 import com.ararahq.arara.sdk.exceptions.AraraNetworkException;
-import com.ararahq.arara.sdk.models.AraraError;
+import com.ararahq.arara.sdk.exceptions.AraraRateLimitException;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
@@ -13,8 +13,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @DisplayName("AraraHttpClient Tests")
@@ -27,17 +30,21 @@ class AraraHttpClientTest {
     void setUp() throws IOException {
         mockWebServer = new MockWebServer();
         mockWebServer.start();
-
-        AraraConfig config = AraraConfig.builder()
-                .baseUrl(mockWebServer.url("/").toString())
-                .apiKey("test-key")
-                .build();
-        client = new AraraHttpClient(config);
+        client = clientWithRetries(0);
     }
 
     @AfterEach
     void tearDown() throws IOException {
         mockWebServer.shutdown();
+    }
+
+    private AraraHttpClient clientWithRetries(int maxRetries) {
+        AraraConfig config = AraraConfig.builder()
+                .baseUrl(mockWebServer.url("/").toString())
+                .apiKey("test-key")
+                .maxRetries(maxRetries)
+                .build();
+        return new AraraHttpClient(config);
     }
 
     @Test
@@ -83,6 +90,146 @@ class AraraHttpClientTest {
     void shouldHandleNetworkFailure() throws IOException {
         mockWebServer.shutdown();
         assertThrows(AraraNetworkException.class, () -> client.get("test", TestResponse.class));
+    }
+
+    @Test
+    @DisplayName("should throw AraraRateLimitException with retry after on 429")
+    void shouldThrowRateLimitExceptionOn429() {
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(429)
+                .setHeader("Retry-After", "7")
+                .setBody("{\"error\":{\"code\":\"RATE_LIMITED\",\"message\":\"Too many requests\"}}"));
+
+        AraraRateLimitException exception = assertThrows(AraraRateLimitException.class,
+                () -> client.get("test", TestResponse.class));
+
+        assertEquals(429, exception.getStatusCode());
+        assertEquals(Duration.ofSeconds(7), exception.getRetryAfter());
+        assertEquals("RATE_LIMITED", exception.getErrorDetails().getCode());
+        assertEquals("Too many requests", exception.getErrorDetails().getMessage());
+    }
+
+    @Test
+    @DisplayName("should throw AraraRateLimitException without retry after when header is absent")
+    void shouldThrowRateLimitExceptionWithoutRetryAfter() {
+        mockWebServer.enqueue(new MockResponse().setResponseCode(429));
+
+        AraraRateLimitException exception = assertThrows(AraraRateLimitException.class,
+                () -> client.get("test", TestResponse.class));
+
+        assertNull(exception.getRetryAfter());
+    }
+
+    @Test
+    @DisplayName("should parse nested error envelope with details")
+    void shouldParseNestedErrorEnvelope() {
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(400)
+                .setBody("{\"error\":{\"code\":\"INSUFFICIENT_CREDITS\","
+                        + "\"message\":\"Not enough credits\","
+                        + "\"details\":{\"balance\":0}}}"));
+
+        AraraApiException exception = assertThrows(AraraApiException.class,
+                () -> client.get("test", TestResponse.class));
+
+        assertEquals("INSUFFICIENT_CREDITS", exception.getErrorDetails().getCode());
+        assertEquals("Not enough credits", exception.getErrorDetails().getMessage());
+        assertEquals(0, exception.getErrorDetails().getDetails().get("balance"));
+    }
+
+    @Test
+    @DisplayName("should fall back to flat error format")
+    void shouldFallBackToFlatErrorFormat() {
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(400)
+                .setBody("{\"error\":\"INVALID_INPUT\",\"message\":\"Invalid payload\"}"));
+
+        AraraApiException exception = assertThrows(AraraApiException.class,
+                () -> client.get("test", TestResponse.class));
+
+        assertEquals("INVALID_INPUT", exception.getErrorDetails().getCode());
+        assertEquals("Invalid payload", exception.getErrorDetails().getMessage());
+    }
+
+    @Test
+    @DisplayName("should keep exception when error body is not valid JSON")
+    void shouldHandleUnparseableErrorBody() {
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(500)
+                .setBody("upstream exploded"));
+
+        AraraApiException exception = assertThrows(AraraApiException.class,
+                () -> client.get("test", TestResponse.class));
+
+        assertEquals(500, exception.getStatusCode());
+        assertNull(exception.getErrorDetails());
+    }
+
+    @Test
+    @DisplayName("should retry on 500 and succeed on next attempt")
+    void shouldRetryOn500AndSucceed() throws InterruptedException {
+        AraraHttpClient retryingClient = clientWithRetries(2);
+        mockWebServer.enqueue(new MockResponse().setResponseCode(500));
+        mockWebServer.enqueue(new MockResponse()
+                .setBody("{\"name\":\"Recovered\"}")
+                .setResponseCode(200));
+
+        TestResponse response = retryingClient.get("test", TestResponse.class);
+
+        assertEquals("Recovered", response.name);
+        assertEquals(2, mockWebServer.getRequestCount());
+        assertNotNull(mockWebServer.takeRequest());
+        assertNotNull(mockWebServer.takeRequest());
+    }
+
+    @Test
+    @DisplayName("should retry on 429 honoring Retry-After header")
+    void shouldRetryOn429HonoringRetryAfter() {
+        AraraHttpClient retryingClient = clientWithRetries(1);
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(429)
+                .setHeader("Retry-After", "0"));
+        mockWebServer.enqueue(new MockResponse()
+                .setBody("{\"name\":\"AfterLimit\"}")
+                .setResponseCode(200));
+
+        TestResponse response = retryingClient.get("test", TestResponse.class);
+
+        assertEquals("AfterLimit", response.name);
+        assertEquals(2, mockWebServer.getRequestCount());
+    }
+
+    @Test
+    @DisplayName("should not retry when max retries is zero")
+    void shouldNotRetryWhenMaxRetriesIsZero() {
+        mockWebServer.enqueue(new MockResponse().setResponseCode(500));
+
+        assertThrows(AraraApiException.class, () -> client.get("test", TestResponse.class));
+        assertEquals(1, mockWebServer.getRequestCount());
+    }
+
+    @Test
+    @DisplayName("should throw after exhausting retries")
+    void shouldThrowAfterExhaustingRetries() {
+        AraraHttpClient retryingClient = clientWithRetries(1);
+        mockWebServer.enqueue(new MockResponse().setResponseCode(503));
+        mockWebServer.enqueue(new MockResponse().setResponseCode(503));
+
+        AraraApiException exception = assertThrows(AraraApiException.class,
+                () -> retryingClient.get("test", TestResponse.class));
+
+        assertEquals(503, exception.getStatusCode());
+        assertEquals(2, mockWebServer.getRequestCount());
+    }
+
+    @Test
+    @DisplayName("should not retry on 4xx other than 429")
+    void shouldNotRetryOnClientError() {
+        AraraHttpClient retryingClient = clientWithRetries(2);
+        mockWebServer.enqueue(new MockResponse().setResponseCode(404));
+
+        assertThrows(AraraApiException.class, () -> retryingClient.get("test", TestResponse.class));
+        assertEquals(1, mockWebServer.getRequestCount());
     }
 
     static class TestResponse {
