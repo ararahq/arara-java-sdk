@@ -22,5 +22,11 @@ public class AraraConfig {
     Duration readTimeout = Duration.ofSeconds(30);
 
     @Builder.Default
+    Duration writeTimeout = Duration.ofSeconds(30);
+
+    @Builder.Default
+    Duration callTimeout = Duration.ofMinutes(2);
+
+    @Builder.Default
     int maxRetries = 3;
 }

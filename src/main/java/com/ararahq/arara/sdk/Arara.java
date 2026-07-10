@@ -8,6 +8,8 @@ import com.ararahq.arara.sdk.services.TemplateService;
 import com.ararahq.arara.sdk.services.UserService;
 import lombok.Getter;
 
+import java.time.Duration;
+
 /**
  * Main entry point for the Arara Java SDK.
  * Use the Builder to configure and instantiate the client.
@@ -51,6 +53,31 @@ public class Arara {
 
         public AraraBuilder baseUrl(String baseUrl) {
             configBuilder.baseUrl(baseUrl);
+            return this;
+        }
+
+        public AraraBuilder connectTimeout(Duration connectTimeout) {
+            configBuilder.connectTimeout(connectTimeout);
+            return this;
+        }
+
+        public AraraBuilder readTimeout(Duration readTimeout) {
+            configBuilder.readTimeout(readTimeout);
+            return this;
+        }
+
+        public AraraBuilder writeTimeout(Duration writeTimeout) {
+            configBuilder.writeTimeout(writeTimeout);
+            return this;
+        }
+
+        public AraraBuilder callTimeout(Duration callTimeout) {
+            configBuilder.callTimeout(callTimeout);
+            return this;
+        }
+
+        public AraraBuilder maxRetries(int maxRetries) {
+            configBuilder.maxRetries(maxRetries);
             return this;
         }
 
