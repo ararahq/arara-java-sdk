@@ -97,7 +97,7 @@ import com.ararahq.arara.sdk.Arara;
 // Criar o cliente
 Arara arara = Arara.builder()
     .apiKey("sua-chave-api-aqui")
-    .baseUrl("https://api.ararahq.com/api")
+    .baseUrl("https://api.ararahq.com")
     .build();
 ```
 
