@@ -3,6 +3,7 @@ package com.ararahq.arara.sdk.services;
 import com.ararahq.arara.sdk.http.AraraHttpClient;
 import com.ararahq.arara.sdk.models.CampaignRequest;
 import com.ararahq.arara.sdk.models.CampaignResponse;
+import com.ararahq.arara.sdk.utils.ValidationUtils;
 
 import java.util.UUID;
 
@@ -23,6 +24,9 @@ public class CampaignService {
      * @return Summary of the created campaign.
      */
     public CampaignResponse create(CampaignRequest request) {
+        ValidationUtils.checkNotNull(request, "request");
+        ValidationUtils.checkNotNull(request.getContacts(), "contacts");
+        request.getContacts().forEach(contact -> ValidationUtils.validateWhatsAppNumber(contact.getTo()));
         return httpClient.post("/v1/campaigns", request, CampaignResponse.class);
     }
 

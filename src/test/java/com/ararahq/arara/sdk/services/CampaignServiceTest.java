@@ -1,5 +1,6 @@
 package com.ararahq.arara.sdk.services;
 
+import com.ararahq.arara.sdk.exceptions.AraraException;
 import com.ararahq.arara.sdk.http.AraraHttpClient;
 import com.ararahq.arara.sdk.models.CampaignContactRequest;
 import com.ararahq.arara.sdk.models.CampaignRequest;
@@ -15,8 +16,10 @@ import java.util.Arrays;
 import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -143,6 +146,63 @@ class CampaignServiceTest {
                 campaignService.getById(campaignId);
                 // Assert
                 verify(httpClient, times(1)).get("/v1/campaigns/" + campaignId.toString(), CampaignResponse.class);
+        }
+
+        @Test
+        @DisplayName("should reject null campaign request")
+        void shouldRejectNullCampaignRequest() {
+                assertThrows(AraraException.class, () -> campaignService.create(null));
+                verifyNoInteractions(httpClient);
+        }
+
+        @Test
+        @DisplayName("should reject campaign without contacts")
+        void shouldRejectCampaignWithoutContacts() {
+                CampaignRequest request = CampaignRequest.builder()
+                                .name("No Contacts Campaign")
+                                .templateName("template")
+                                .sender("whatsapp:+551140001000")
+                                .build();
+
+                assertThrows(AraraException.class, () -> campaignService.create(request));
+                verifyNoInteractions(httpClient);
+        }
+
+        @Test
+        @DisplayName("should reject contact without whatsapp prefix")
+        void shouldRejectContactWithoutWhatsappPrefix() {
+                CampaignContactRequest invalidContact = CampaignContactRequest.builder()
+                                .to("+5511999998888")
+                                .build();
+                CampaignRequest request = CampaignRequest.builder()
+                                .name("Invalid Contact Campaign")
+                                .templateName("template")
+                                .sender("whatsapp:+551140001000")
+                                .contacts(Arrays.asList(invalidContact))
+                                .build();
+
+                assertThrows(AraraException.class, () -> campaignService.create(request));
+                verifyNoInteractions(httpClient);
+        }
+
+        @Test
+        @DisplayName("should reject campaign when any contact is invalid")
+        void shouldRejectCampaignWhenAnyContactIsInvalid() {
+                CampaignContactRequest validContact = CampaignContactRequest.builder()
+                                .to("whatsapp:+5511999998888")
+                                .build();
+                CampaignContactRequest invalidContact = CampaignContactRequest.builder()
+                                .to("5511988887777")
+                                .build();
+                CampaignRequest request = CampaignRequest.builder()
+                                .name("Mixed Contacts Campaign")
+                                .templateName("template")
+                                .sender("whatsapp:+551140001000")
+                                .contacts(Arrays.asList(validContact, invalidContact))
+                                .build();
+
+                assertThrows(AraraException.class, () -> campaignService.create(request));
+                verifyNoInteractions(httpClient);
         }
 
         @Test

@@ -11,7 +11,7 @@ import java.time.Duration;
 @Builder
 public class AraraConfig {
     @Builder.Default
-    String baseUrl = "https://api.ararahq.com/api";
+    String baseUrl = "https://api.ararahq.com";
 
     String apiKey;
 
@@ -20,6 +20,12 @@ public class AraraConfig {
 
     @Builder.Default
     Duration readTimeout = Duration.ofSeconds(30);
+
+    @Builder.Default
+    Duration writeTimeout = Duration.ofSeconds(30);
+
+    @Builder.Default
+    Duration callTimeout = Duration.ofMinutes(2);
 
     @Builder.Default
     int maxRetries = 3;

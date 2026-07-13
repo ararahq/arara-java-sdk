@@ -1,6 +1,5 @@
 # Arara Java SDK
 
-[![Maven Central](https://img.shields.io/maven-central/v/com.ararahq/arara-java-sdk)](https://central.sonatype.com/artifact/com.ararahq/arara-java-sdk)
 [![Java](https://img.shields.io/badge/Java-17%2B-orange)](https://www.java.com/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![Docs](https://img.shields.io/badge/Docs-docs.ararahq.com-orange)](https://docs.ararahq.com)
@@ -31,26 +30,61 @@ O Arara Java SDK é uma biblioteca leve e type-safe para integração perfeita c
 
 ## Instalação
 
+O SDK é distribuído via **GitHub Packages** (não está publicado no Maven Central). O GitHub Packages exige autenticação mesmo para leitura: use seu usuário do GitHub e um personal access token com escopo `read:packages`.
+
 ### Usando Gradle
 
-Adicione a dependência ao seu `build.gradle`:
+Adicione o repositório e a dependência ao seu `build.gradle`:
 
 ```gradle
+repositories {
+    mavenCentral()
+    maven {
+        name = "GitHubPackages"
+        url = uri("https://maven.pkg.github.com/ararahq/arara-java-sdk")
+        credentials {
+            username = System.getenv("GITHUB_ACTOR") ?: project.findProperty("gpr.user")
+            password = System.getenv("GITHUB_TOKEN") ?: project.findProperty("gpr.key")
+        }
+    }
+}
+
 dependencies {
-    implementation 'com.ararahq:arara-java-sdk:1.8.0'
+    implementation 'com.ararahq:arara-java-sdk:1.8.1'
 }
 ```
 
+Defina as credenciais em `~/.gradle/gradle.properties` (`gpr.user` e `gpr.key`) ou nas variáveis de ambiente `GITHUB_ACTOR` e `GITHUB_TOKEN`.
+
 ### Usando Maven
 
-Adicione ao seu `pom.xml`:
+Adicione o repositório ao seu `pom.xml`:
 
 ```xml
+<repositories>
+    <repository>
+        <id>github</id>
+        <url>https://maven.pkg.github.com/ararahq/arara-java-sdk</url>
+    </repository>
+</repositories>
+
 <dependency>
     <groupId>com.ararahq</groupId>
     <artifactId>arara-java-sdk</artifactId>
-    <version>1.8.0</version>
+    <version>1.8.1</version>
 </dependency>
+```
+
+E as credenciais no `~/.m2/settings.xml`:
+
+```xml
+<servers>
+    <server>
+        <id>github</id>
+        <username>SEU_USUARIO_GITHUB</username>
+        <password>SEU_TOKEN_COM_READ_PACKAGES</password>
+    </server>
+</servers>
 ```
 
 ## Início Rápido
@@ -63,9 +97,24 @@ import com.ararahq.arara.sdk.Arara;
 // Criar o cliente
 Arara arara = Arara.builder()
     .apiKey("sua-chave-api-aqui")
-    .baseUrl("https://api.ararahq.com/api")
+    .baseUrl("https://api.ararahq.com")
     .build();
 ```
+
+Timeouts e retries são configuráveis no builder (valores abaixo são os defaults):
+
+```java
+Arara arara = Arara.builder()
+    .apiKey("sua-chave-api-aqui")
+    .connectTimeout(Duration.ofSeconds(10))
+    .readTimeout(Duration.ofSeconds(30))
+    .writeTimeout(Duration.ofSeconds(30))
+    .callTimeout(Duration.ofMinutes(2))
+    .maxRetries(3)
+    .build();
+```
+
+Falhas de rede, respostas 5xx e 429 são reenviadas automaticamente com backoff exponencial até `maxRetries`, honrando o header `Retry-After` quando presente.
 
 ### 2. Enviar uma Mensagem
 
@@ -248,6 +297,9 @@ try {
 } catch (AraraAuthException e) {
     // Tratar erros de autenticação (401, 403)
     System.err.println("Autenticação falhou: " + e.getMessage());
+} catch (AraraRateLimitException e) {
+    // Tratar rate limit (429) após esgotar os retries automáticos
+    System.err.println("Rate limit atingido. Aguarde: " + e.getRetryAfter());
 } catch (AraraApiException e) {
     // Tratar erros da API com código de status e detalhes
     System.err.println("Erro da API " + e.getStatusCode() + ": " + e.getMessage());

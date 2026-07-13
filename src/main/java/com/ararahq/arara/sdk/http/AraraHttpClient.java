@@ -5,9 +5,13 @@ import com.ararahq.arara.sdk.exceptions.AraraApiException;
 import com.ararahq.arara.sdk.exceptions.AraraAuthException;
 import com.ararahq.arara.sdk.exceptions.AraraException;
 import com.ararahq.arara.sdk.exceptions.AraraNetworkException;
+import com.ararahq.arara.sdk.exceptions.AraraRateLimitException;
 import com.ararahq.arara.sdk.interceptors.AuthInterceptor;
+import com.ararahq.arara.sdk.interceptors.RetryInterceptor;
 import com.ararahq.arara.sdk.models.AraraError;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import okhttp3.MediaType;
@@ -19,6 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Map;
 
 /**
  * Internal HTTP client based on OkHttp for making calls to the Arara API.
@@ -40,7 +45,10 @@ public class AraraHttpClient {
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(config.getConnectTimeout())
                 .readTimeout(config.getReadTimeout())
+                .writeTimeout(config.getWriteTimeout())
+                .callTimeout(config.getCallTimeout())
                 .addInterceptor(new AuthInterceptor(config.getApiKey()))
+                .addInterceptor(new RetryInterceptor(config.getMaxRetries()))
                 .build();
     }
 
@@ -115,21 +123,45 @@ public class AraraHttpClient {
 
     private void handleErrorResponse(Response response) throws IOException {
         String body = response.body() != null ? response.body().string() : "";
-        AraraError errorDetails = null;
-
-        try {
-            if (!body.isEmpty()) {
-                errorDetails = objectMapper.readValue(body, AraraError.class);
-            }
-        } catch (Exception e) {
-            log.warn("Could not parse API error: {}", body);
-        }
+        AraraError errorDetails = parseError(body);
 
         int code = response.code();
         if (code == 401 || code == 403) {
             throw new AraraAuthException(errorDetails != null ? errorDetails.getMessage() : "Unauthorized");
         }
+        if (code == 429) {
+            throw new AraraRateLimitException(errorDetails,
+                    RetryInterceptor.parseRetryAfter(response.header("Retry-After")));
+        }
 
         throw new AraraApiException(code, errorDetails);
+    }
+
+    private AraraError parseError(String body) {
+        if (body == null || body.isEmpty()) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            JsonNode error = root.path("error");
+            if (error.isObject()) {
+                return AraraError.builder()
+                        .code(error.path("code").asText(null))
+                        .message(error.path("message").asText(null))
+                        .details(error.path("details").isObject()
+                                ? objectMapper.convertValue(error.path("details"),
+                                        new TypeReference<Map<String, Object>>() {
+                                        })
+                                : null)
+                        .build();
+            }
+            return AraraError.builder()
+                    .code(error.isTextual() ? error.asText() : null)
+                    .message(root.path("message").asText(null))
+                    .build();
+        } catch (Exception e) {
+            log.warn("Could not parse API error: {}", body);
+            return null;
+        }
     }
 }
