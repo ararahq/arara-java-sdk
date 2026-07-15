@@ -11,7 +11,7 @@ import java.time.Duration;
 @Builder
 public class AraraConfig {
     @Builder.Default
-    String baseUrl = "https://api.ararahq.com";
+    String baseUrl = "https://api.ararahq.com/api";
 
     String apiKey;
 

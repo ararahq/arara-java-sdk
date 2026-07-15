@@ -125,14 +125,14 @@ class AraraHttpClientTest {
     void shouldParseNestedErrorEnvelope() {
         mockWebServer.enqueue(new MockResponse()
                 .setResponseCode(400)
-                .setBody("{\"error\":{\"code\":\"INSUFFICIENT_CREDITS\","
+                .setBody("{\"error\":{\"code\":\"INSUFFICIENT_FUNDS\","
                         + "\"message\":\"Not enough credits\","
                         + "\"details\":{\"balance\":0}}}"));
 
         AraraApiException exception = assertThrows(AraraApiException.class,
                 () -> client.get("test", TestResponse.class));
 
-        assertEquals("INSUFFICIENT_CREDITS", exception.getErrorDetails().getCode());
+        assertEquals("INSUFFICIENT_FUNDS", exception.getErrorDetails().getCode());
         assertEquals("Not enough credits", exception.getErrorDetails().getMessage());
         assertEquals(0, exception.getErrorDetails().getDetails().get("balance"));
     }
