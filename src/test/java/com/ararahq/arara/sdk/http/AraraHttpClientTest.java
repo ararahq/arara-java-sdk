@@ -5,8 +5,10 @@ import com.ararahq.arara.sdk.exceptions.AraraApiException;
 import com.ararahq.arara.sdk.exceptions.AraraAuthException;
 import com.ararahq.arara.sdk.exceptions.AraraNetworkException;
 import com.ararahq.arara.sdk.exceptions.AraraRateLimitException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -14,11 +16,14 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("AraraHttpClient Tests")
 class AraraHttpClientTest {
@@ -230,6 +235,124 @@ class AraraHttpClientTest {
 
         assertThrows(AraraApiException.class, () -> retryingClient.get("test", TestResponse.class));
         assertEquals(1, mockWebServer.getRequestCount());
+    }
+
+    @Test
+    @DisplayName("should handle GET with generic TypeReference")
+    void shouldHandleGetWithTypeReference() {
+        mockWebServer.enqueue(new MockResponse()
+                .setBody("{\"name\":\"Generic\"}")
+                .setResponseCode(200));
+
+        Map<String, Object> response = client.get("test", new TypeReference<Map<String, Object>>() {
+        });
+        assertEquals("Generic", response.get("name"));
+    }
+
+    @Test
+    @DisplayName("should return null when body is empty for TypeReference GET")
+    void shouldReturnNullForEmptyTypeReferenceBody() {
+        mockWebServer.enqueue(new MockResponse().setResponseCode(200));
+
+        Map<String, Object> response = client.get("test", new TypeReference<Map<String, Object>>() {
+        });
+        assertNull(response);
+    }
+
+    @Test
+    @DisplayName("should handle POST with generic TypeReference")
+    void shouldHandlePostWithTypeReference() {
+        mockWebServer.enqueue(new MockResponse()
+                .setBody("[{\"name\":\"One\"}]")
+                .setResponseCode(200));
+
+        List<Map<String, Object>> response = client.post("test", Map.of("k", "v"),
+                new TypeReference<List<Map<String, Object>>>() {
+                });
+        assertEquals("One", response.get(0).get("name"));
+    }
+
+    @Test
+    @DisplayName("should handle successful PUT")
+    void shouldHandleSuccessfulPut() {
+        mockWebServer.enqueue(new MockResponse()
+                .setBody("{\"name\":\"Put\"}")
+                .setResponseCode(200));
+
+        TestResponse response = client.put("test", new TestResponse("Data"), TestResponse.class);
+        assertEquals("Put", response.name);
+    }
+
+    @Test
+    @DisplayName("should handle PUT with generic TypeReference")
+    void shouldHandlePutWithTypeReference() {
+        mockWebServer.enqueue(new MockResponse()
+                .setBody("{\"name\":\"PutGeneric\"}")
+                .setResponseCode(200));
+
+        Map<String, Object> response = client.put("test", Map.of("k", "v"),
+                new TypeReference<Map<String, Object>>() {
+                });
+        assertEquals("PutGeneric", response.get("name"));
+    }
+
+    @Test
+    @DisplayName("should handle successful PATCH")
+    void shouldHandleSuccessfulPatch() {
+        mockWebServer.enqueue(new MockResponse()
+                .setBody("{\"name\":\"Patched\"}")
+                .setResponseCode(200));
+
+        TestResponse response = client.patch("test", new TestResponse("Data"), TestResponse.class);
+        assertEquals("Patched", response.name);
+    }
+
+    @Test
+    @DisplayName("should handle PATCH with generic TypeReference")
+    void shouldHandlePatchWithTypeReference() {
+        mockWebServer.enqueue(new MockResponse()
+                .setBody("{\"name\":\"PatchGeneric\"}")
+                .setResponseCode(200));
+
+        Map<String, Object> response = client.patch("test", Map.of("k", "v"),
+                new TypeReference<Map<String, Object>>() {
+                });
+        assertEquals("PatchGeneric", response.get("name"));
+    }
+
+    @Test
+    @DisplayName("should send empty JSON body when payload is null")
+    void shouldSendEmptyBodyWhenPayloadNull() throws InterruptedException {
+        mockWebServer.enqueue(new MockResponse()
+                .setBody("{\"name\":\"NullBody\"}")
+                .setResponseCode(200));
+
+        TestResponse response = client.post("test", null, TestResponse.class);
+
+        assertEquals("NullBody", response.name);
+        RecordedRequest recorded = mockWebServer.takeRequest();
+        assertEquals("POST", recorded.getMethod());
+        assertEquals("", recorded.getBody().readUtf8());
+    }
+
+    @Test
+    @DisplayName("should handle DELETE discarding the response body")
+    void shouldHandleDelete() throws InterruptedException {
+        mockWebServer.enqueue(new MockResponse().setResponseCode(204));
+
+        client.delete("test/1");
+
+        RecordedRequest recorded = mockWebServer.takeRequest();
+        assertEquals("DELETE", recorded.getMethod());
+        assertTrue(recorded.getPath().endsWith("test/1"));
+    }
+
+    @Test
+    @DisplayName("should propagate error status on DELETE failure")
+    void shouldPropagateDeleteError() {
+        mockWebServer.enqueue(new MockResponse().setResponseCode(404));
+
+        assertThrows(AraraApiException.class, () -> client.delete("test/1"));
     }
 
     static class TestResponse {
