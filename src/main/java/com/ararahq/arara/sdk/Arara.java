@@ -2,10 +2,17 @@ package com.ararahq.arara.sdk;
 
 import com.ararahq.arara.sdk.config.AraraConfig;
 import com.ararahq.arara.sdk.http.AraraHttpClient;
+import com.ararahq.arara.sdk.services.ApiKeyService;
 import com.ararahq.arara.sdk.services.CampaignService;
+import com.ararahq.arara.sdk.services.ContactService;
+import com.ararahq.arara.sdk.services.ConversationService;
 import com.ararahq.arara.sdk.services.MessageService;
+import com.ararahq.arara.sdk.services.NumberService;
+import com.ararahq.arara.sdk.services.OrganizationService;
+import com.ararahq.arara.sdk.services.SmartLinkService;
 import com.ararahq.arara.sdk.services.TemplateService;
 import com.ararahq.arara.sdk.services.UserService;
+import com.ararahq.arara.sdk.services.WalletService;
 import lombok.Getter;
 
 import java.time.Duration;
@@ -20,6 +27,13 @@ public class Arara {
     private final UserService users;
     private final CampaignService campaigns;
     private final TemplateService templates;
+    private final ContactService contacts;
+    private final ConversationService conversations;
+    private final WalletService wallet;
+    private final NumberService numbers;
+    private final SmartLinkService smartLinks;
+    private final ApiKeyService apiKeys;
+    private final OrganizationService organizations;
 
     private Arara(AraraConfig config) {
         if (config.getApiKey() == null || config.getApiKey().isEmpty()) {
@@ -31,6 +45,13 @@ public class Arara {
         this.users = new UserService(httpClient);
         this.campaigns = new CampaignService(httpClient);
         this.templates = new TemplateService(httpClient);
+        this.contacts = new ContactService(httpClient);
+        this.conversations = new ConversationService(httpClient);
+        this.wallet = new WalletService(httpClient);
+        this.numbers = new NumberService(httpClient);
+        this.smartLinks = new SmartLinkService(httpClient);
+        this.apiKeys = new ApiKeyService(httpClient);
+        this.organizations = new OrganizationService(httpClient);
     }
 
     /**

@@ -56,25 +56,56 @@ public class AraraHttpClient {
      * Performs a GET request.
      */
     public <T> T get(String path, Class<T> responseType) {
-        Request request = new Request.Builder()
-                .url(baseUrl + path)
-                .get()
-                .build();
-        return execute(request, responseType);
+        return execute(buildGet(path), responseType);
+    }
+
+    /**
+     * Performs a GET request with a generic response type.
+     */
+    public <T> T get(String path, TypeReference<T> responseType) {
+        return execute(buildGet(path), responseType);
     }
 
     /**
      * Performs a POST request with JSON body.
      */
     public <T> T post(String path, Object body, Class<T> responseType) {
-        return requestWithBody("POST", path, body, responseType);
+        return execute(buildBody("POST", path, body), responseType);
+    }
+
+    /**
+     * Performs a POST request with a generic response type.
+     */
+    public <T> T post(String path, Object body, TypeReference<T> responseType) {
+        return execute(buildBody("POST", path, body), responseType);
+    }
+
+    /**
+     * Performs a PUT request with JSON body.
+     */
+    public <T> T put(String path, Object body, Class<T> responseType) {
+        return execute(buildBody("PUT", path, body), responseType);
+    }
+
+    /**
+     * Performs a PUT request with a generic response type.
+     */
+    public <T> T put(String path, Object body, TypeReference<T> responseType) {
+        return execute(buildBody("PUT", path, body), responseType);
     }
 
     /**
      * Performs a PATCH request with JSON body.
      */
     public <T> T patch(String path, Object body, Class<T> responseType) {
-        return requestWithBody("PATCH", path, body, responseType);
+        return execute(buildBody("PATCH", path, body), responseType);
+    }
+
+    /**
+     * Performs a PATCH request with a generic response type.
+     */
+    public <T> T patch(String path, Object body, TypeReference<T> responseType) {
+        return execute(buildBody("PATCH", path, body), responseType);
     }
 
     /**
@@ -88,33 +119,64 @@ public class AraraHttpClient {
         execute(request, Void.class);
     }
 
-    private <T> T requestWithBody(String method, String path, Object body, Class<T> responseType) {
-        try {
-            String json = objectMapper.writeValueAsString(body);
-            RequestBody requestBody = RequestBody.create(json, JSON);
+    private Request buildGet(String path) {
+        return new Request.Builder()
+                .url(baseUrl + path)
+                .get()
+                .build();
+    }
 
-            Request request = new Request.Builder()
+    private Request buildBody(String method, String path, Object body) {
+        try {
+            RequestBody requestBody = body == null
+                    ? RequestBody.create("", JSON)
+                    : RequestBody.create(objectMapper.writeValueAsString(body), JSON);
+            return new Request.Builder()
                     .url(baseUrl + path)
                     .method(method, requestBody)
                     .build();
-
-            return execute(request, responseType);
         } catch (IOException e) {
             throw new AraraException("Error serializing object to JSON", e);
         }
     }
 
     private <T> T execute(Request request, Class<T> responseType) {
+        if (responseType == Void.class) {
+            call(request, true);
+            return null;
+        }
+        String body = call(request, false);
+        if (body == null || body.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(body, responseType);
+        } catch (IOException e) {
+            throw new AraraNetworkException("Error deserializing Arara API response", e);
+        }
+    }
+
+    private <T> T execute(Request request, TypeReference<T> responseType) {
+        String body = call(request, false);
+        if (body == null || body.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(body, responseType);
+        } catch (IOException e) {
+            throw new AraraNetworkException("Error deserializing Arara API response", e);
+        }
+    }
+
+    private String call(Request request, boolean discardBody) {
         try (Response response = httpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 handleErrorResponse(response);
             }
-
-            if (responseType == Void.class || response.body() == null) {
+            if (discardBody || response.body() == null) {
                 return null;
             }
-
-            return objectMapper.readValue(response.body().string(), responseType);
+            return response.body().string();
         } catch (IOException e) {
             log.error("Network error accessing Arara API: {}", request.url(), e);
             throw new AraraNetworkException("Communication failure with Arara API", e);
