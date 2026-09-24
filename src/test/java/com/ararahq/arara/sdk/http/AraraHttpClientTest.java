@@ -499,6 +499,53 @@ class AraraHttpClientTest {
         assertThrows(AraraApiException.class, () -> client.delete("test/1"));
     }
 
+    @Test
+    @DisplayName("should retry POST with Idempotency-Key after connection drop, same key and body")
+    void shouldRetryPostAfterDisconnectWithSameKeyAndBody() throws InterruptedException {
+        AraraHttpClient retryingClient = clientWithRetries(1);
+        mockWebServer.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST));
+        mockWebServer.enqueue(new MockResponse().setResponseCode(200).setBody("{\"name\":\"Ok\"}"));
+
+        TestResponse response = retryingClient.post("test", Map.of("k", "v"),
+                Map.of("Idempotency-Key", "key-1"), TestResponse.class);
+
+        RecordedRequest first = mockWebServer.takeRequest();
+        RecordedRequest second = mockWebServer.takeRequest();
+        assertEquals("Ok", response.name);
+        assertEquals("key-1", first.getHeader("Idempotency-Key"));
+        assertEquals("key-1", second.getHeader("Idempotency-Key"));
+        assertEquals(first.getBody().readUtf8(), second.getBody().readUtf8());
+    }
+
+    @Test
+    @DisplayName("should not wait on Retry-After above the cap and surface it")
+    void shouldNotRetryWhenRetryAfterAboveCap() {
+        AraraHttpClient retryingClient = clientWithRetries(3);
+        mockWebServer.enqueue(new MockResponse().setResponseCode(429).setHeader("Retry-After", "3600"));
+
+        long start = System.nanoTime();
+        AraraRateLimitException exception = assertThrows(AraraRateLimitException.class,
+                () -> retryingClient.get("test", TestResponse.class));
+
+        assertTrue(Duration.ofNanos(System.nanoTime() - start).getSeconds() < 5);
+        assertEquals(1, mockWebServer.getRequestCount());
+        assertEquals(Duration.ofSeconds(3600), exception.getRetryAfter());
+    }
+
+    @Test
+    @DisplayName("should not take a flat non-code error as code")
+    void shouldIgnoreFlatNonCodeError() {
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(403)
+                .setBody("{\"error\":\"Forbidden\",\"message\":\"Access Denied\"}"));
+
+        AraraAuthException exception = assertThrows(AraraAuthException.class,
+                () -> client.get("test", TestResponse.class));
+
+        assertNull(exception.getCode());
+        assertEquals("Access Denied", exception.getMessage());
+    }
+
     static class TestResponse {
         public String name;
 

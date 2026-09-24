@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Internal HTTP client based on OkHttp for making calls to the Arara API.
@@ -38,6 +39,7 @@ public class AraraHttpClient {
     private static final int HTTP_UNAUTHORIZED = 401;
     private static final int HTTP_FORBIDDEN = 403;
     private static final int HTTP_TOO_MANY_REQUESTS = 429;
+    private static final Pattern ERROR_CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_]+$");
     private static final String RETRY_AFTER_HEADER = "Retry-After";
     private static final TypeReference<Map<String, Object>> DETAILS_TYPE =
             new TypeReference<Map<String, Object>>() {
@@ -262,8 +264,9 @@ public class AraraHttpClient {
                         .message(message != null ? message : textOrNull(error))
                         .build();
             }
+            String flatCode = textOrNull(error);
             return AraraError.builder()
-                    .code(textOrNull(error))
+                    .code(flatCode != null && ERROR_CODE_PATTERN.matcher(flatCode).matches() ? flatCode : null)
                     .message(textOrNull(root.path("message")))
                     .build();
         } catch (IOException | IllegalArgumentException e) {
