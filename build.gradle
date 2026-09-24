@@ -142,3 +142,8 @@ test {
         exceptionFormat "full"
     }
 }
+
+tasks.withType(AbstractArchiveTask).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
