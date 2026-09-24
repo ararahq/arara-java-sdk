@@ -40,62 +40,116 @@ jobs:
         id: version
         run: |
           VERSION=$(grep '^araraSdkVersion=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
-          GROUP_PATH=$(grep '^araraSdkGroup=' gradle.properties | cut -d= -f2 | tr -d '[:space:]' | tr . /)
+          GROUP=$(grep '^araraSdkGroup=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+          ARTIFACT=$(sed -n "s/^rootProject.name *= *['\"]\([^'\"]*\)['\"].*/\1/p" settings.gradle)
+          if [ -z "$VERSION" ] || [ -z "$GROUP" ] || [ -z "$ARTIFACT" ]; then
+            echo "Could not read version, group or artifactId." >&2
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "group_path=$GROUP_PATH" >> "$GITHUB_OUTPUT"
-      - name: Check if version already exists on Maven Central
+          echo "group=$GROUP" >> "$GITHUB_OUTPUT"
+          echo "group_path=$(echo "$GROUP" | tr . /)" >> "$GITHUB_OUTPUT"
+          echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Check each destination
         id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          GROUP: ${{ steps.version.outputs.group }}
+          GROUP_PATH: ${{ steps.version.outputs.group_path }}
+          ARTIFACT: ${{ steps.version.outputs.artifact }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          URL="https://repo1.maven.org/maven2/${{ steps.version.outputs.group_path }}/arara-java-sdk/${{ steps.version.outputs.version }}/arara-java-sdk-${{ steps.version.outputs.version }}.pom"
-          STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$URL")
-          if [ "$STATUS" = "200" ]; then
-            echo "Version ${{ steps.version.outputs.version }} already on Maven Central. Skipping publish."
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          elif [ "$STATUS" = "404" ]; then
-            echo "publish=true" >> "$GITHUB_OUTPUT"
+          CENTRAL_URL="https://repo1.maven.org/maven2/$GROUP_PATH/$ARTIFACT/$VERSION/$ARTIFACT-$VERSION.pom"
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$CENTRAL_URL")
+          case "$STATUS" in
+            200) echo "central=false" >> "$GITHUB_OUTPUT" ;;
+            404) echo "central=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "Unexpected status $STATUS from Maven Central." >&2; exit 1 ;;
+          esac
+
+          if VERSIONS=$(gh api "/orgs/ararahq/packages/maven/$GROUP.$ARTIFACT/versions" --paginate --jq '.[].name' 2>/tmp/gh-err); then
+            if echo "$VERSIONS" | grep -qx "$VERSION"; then
+              echo "packages=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "packages=true" >> "$GITHUB_OUTPUT"
+            fi
+          elif grep -q "404" /tmp/gh-err; then
+            echo "packages=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Unexpected status $STATUS from Maven Central." >&2
+            cat /tmp/gh-err >&2
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "tag=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Fail fast if publishing secrets are missing
+        if: steps.check.outputs.central == 'true' || steps.check.outputs.packages == 'true'
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          MISSING=""
+          for NAME in MAVEN_CENTRAL_USERNAME MAVEN_CENTRAL_PASSWORD GPG_PRIVATE_KEY GPG_PASSPHRASE; do
+            if [ -z "${!NAME}" ]; then
+              MISSING="$MISSING $NAME"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "Missing publishing secrets:$MISSING" >&2
             exit 1
           fi
       - name: Set up JDK 17
-        if: steps.check.outputs.publish == 'true'
+        if: steps.check.outputs.central == 'true' || steps.check.outputs.packages == 'true'
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
       - name: Setup Gradle
-        if: steps.check.outputs.publish == 'true'
+        if: steps.check.outputs.central == 'true' || steps.check.outputs.packages == 'true'
         uses: gradle/actions/setup-gradle@v4
-      - name: Publish to Maven Central (signed)
-        if: steps.check.outputs.publish == 'true'
-        run: ./gradlew publishAndReleaseToMavenCentral --no-configuration-cache
+      - name: Publish signed artifacts in a single Gradle run
+        if: steps.check.outputs.central == 'true' || steps.check.outputs.packages == 'true'
         env:
+          PUBLISH_CENTRAL: ${{ steps.check.outputs.central }}
+          PUBLISH_PACKAGES: ${{ steps.check.outputs.packages }}
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
-      - name: Publish to GitHub Packages
-        if: steps.check.outputs.publish == 'true'
-        run: ./gradlew publishMavenPublicationToGitHubPackagesRepository
-        env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ github.token }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
-      - name: Create tag and GitHub release
-        if: steps.check.outputs.publish == 'true'
+        run: |
+          TASKS=""
+          if [ "$PUBLISH_CENTRAL" = "true" ]; then
+            TASKS="$TASKS publishAndReleaseToMavenCentral"
+          fi
+          if [ "$PUBLISH_PACKAGES" = "true" ]; then
+            TASKS="$TASKS publishMavenPublicationToGitHubPackagesRepository"
+          fi
+          ./gradlew $TASKS --no-configuration-cache
+      - name: Create tag
+        if: steps.check.outputs.tag == 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git tag "$TAG"
+          git push origin "$TAG"
+      - name: Create GitHub release
+        if: steps.check.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="v${{ steps.version.outputs.version }}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists."
-          else
-            git tag "$TAG"
-            git push origin "$TAG"
-          fi
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists."
-          else
-            gh release create "$TAG" --title "$TAG" --generate-notes
-          fi
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh release create "$TAG" --title "$TAG" --generate-notes
