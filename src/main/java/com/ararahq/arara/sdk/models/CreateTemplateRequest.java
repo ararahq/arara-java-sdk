@@ -21,6 +21,8 @@ public class CreateTemplateRequest {
     String language = "pt_BR";
 
     String header;
+    /** Header type: TEXT, IMAGE, VIDEO or DOCUMENT. Required for media headers. */
+    String headerType;
     String footer;
     List<TemplateButton> buttons;
     Map<String, String> samples;

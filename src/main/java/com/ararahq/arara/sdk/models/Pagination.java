@@ -5,14 +5,14 @@ import lombok.Value;
 import lombok.extern.jackson.Jacksonized;
 
 /**
- * Owner of the API key, returned by {@code GET /auth/me}.
+ * Pagination metadata of a {@link PaginatedResponse}.
  */
 @Value
 @Builder
 @Jacksonized
-public class UserResponse {
-    String name;
-    String email;
-    String role;
-    boolean emailPending;
+public class Pagination {
+    int page;
+    int size;
+    long totalElements;
+    int totalPages;
 }

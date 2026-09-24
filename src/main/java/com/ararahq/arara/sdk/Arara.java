@@ -1,17 +1,18 @@
 package com.ararahq.arara.sdk;
 
 import com.ararahq.arara.sdk.config.AraraConfig;
+import com.ararahq.arara.sdk.exceptions.AraraException;
 import com.ararahq.arara.sdk.http.AraraHttpClient;
-import com.ararahq.arara.sdk.services.ApiKeyService;
+import com.ararahq.arara.sdk.services.AuthService;
 import com.ararahq.arara.sdk.services.CampaignService;
 import com.ararahq.arara.sdk.services.ContactService;
 import com.ararahq.arara.sdk.services.ConversationService;
 import com.ararahq.arara.sdk.services.MessageService;
 import com.ararahq.arara.sdk.services.NumberService;
+import com.ararahq.arara.sdk.services.OptOutService;
 import com.ararahq.arara.sdk.services.OrganizationService;
 import com.ararahq.arara.sdk.services.SmartLinkService;
 import com.ararahq.arara.sdk.services.TemplateService;
-import com.ararahq.arara.sdk.services.UserService;
 import com.ararahq.arara.sdk.services.WalletService;
 import lombok.Getter;
 
@@ -24,7 +25,7 @@ import java.time.Duration;
 @Getter
 public class Arara {
     private final MessageService messages;
-    private final UserService users;
+    private final AuthService auth;
     private final CampaignService campaigns;
     private final TemplateService templates;
     private final ContactService contacts;
@@ -32,17 +33,17 @@ public class Arara {
     private final WalletService wallet;
     private final NumberService numbers;
     private final SmartLinkService smartLinks;
-    private final ApiKeyService apiKeys;
+    private final OptOutService optOuts;
     private final OrganizationService organizations;
 
     private Arara(AraraConfig config) {
         if (config.getApiKey() == null || config.getApiKey().isEmpty()) {
-            throw new com.ararahq.arara.sdk.exceptions.AraraException(
+            throw new AraraException(
                     "API Key is required to initialize the SDK.");
         }
         AraraHttpClient httpClient = new AraraHttpClient(config);
         this.messages = new MessageService(httpClient);
-        this.users = new UserService(httpClient);
+        this.auth = new AuthService(httpClient);
         this.campaigns = new CampaignService(httpClient);
         this.templates = new TemplateService(httpClient);
         this.contacts = new ContactService(httpClient);
@@ -50,7 +51,7 @@ public class Arara {
         this.wallet = new WalletService(httpClient);
         this.numbers = new NumberService(httpClient);
         this.smartLinks = new SmartLinkService(httpClient);
-        this.apiKeys = new ApiKeyService(httpClient);
+        this.optOuts = new OptOutService(httpClient);
         this.organizations = new OrganizationService(httpClient);
     }
 

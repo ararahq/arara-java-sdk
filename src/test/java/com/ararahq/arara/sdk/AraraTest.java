@@ -19,7 +19,8 @@ class AraraTest {
                 .build();
 
         assertNotNull(arara.getMessages());
-        assertNotNull(arara.getUsers());
+        assertNotNull(arara.getAuth());
+        assertNotNull(arara.getOptOuts());
         assertNotNull(arara.getCampaigns());
         assertNotNull(arara.getTemplates());
     }

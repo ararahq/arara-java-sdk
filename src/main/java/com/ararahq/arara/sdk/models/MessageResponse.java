@@ -18,5 +18,8 @@ public class MessageResponse {
     String sender;
     String receiver;
     String body;
+    /** Cost of the message; null when not billed yet. */
     BigDecimal cost;
+    /** Rejection or failure reason, when present. */
+    String reason;
 }
