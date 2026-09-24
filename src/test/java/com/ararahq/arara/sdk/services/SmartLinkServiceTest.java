@@ -8,6 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @DisplayName("SmartLinkService against fake API")
 class SmartLinkServiceTest extends FakeApi {
@@ -52,5 +53,22 @@ class SmartLinkServiceTest extends FakeApi {
         assertEquals("5511999998888", json(take("POST", "/v1/smart-links/whatsapp")).get("phoneNumber").asText());
         assertEquals("Loja 2", json(take("PUT", "/v1/smart-links/whatsapp/" + ID)).get("name").asText());
         take("GET", "/v1/smart-links/whatsapp/" + ID + "/stats");
+    }
+
+    @Test
+    @DisplayName("should encode id in update and stats paths and reject null id")
+    void shouldEncodeIdAndRejectNull() throws Exception {
+        respond(200, LINK);
+        respond(200, "{}");
+
+        arara.getSmartLinks().update("a b/c", UpdateWhatsAppSmartLinkRequest.builder().name("x").build());
+        arara.getSmartLinks().stats("a b/c");
+
+        take("PUT", "/v1/smart-links/whatsapp/a%20b%2Fc");
+        take("GET", "/v1/smart-links/whatsapp/a%20b%2Fc/stats");
+        assertThrows(RuntimeException.class,
+                () -> arara.getSmartLinks().update(null, UpdateWhatsAppSmartLinkRequest.builder().build()));
+        assertThrows(RuntimeException.class, () -> arara.getSmartLinks().stats(null));
+        assertEquals(2, server.getRequestCount());
     }
 }

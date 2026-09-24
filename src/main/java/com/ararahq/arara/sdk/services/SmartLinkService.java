@@ -35,8 +35,9 @@ public class SmartLinkService {
      * Updates a smart link. PUT /v1/smart-links/whatsapp/{id}
      */
     public WhatsAppSmartLinkResponse update(String id, UpdateWhatsAppSmartLinkRequest request) {
+        ValidationUtils.checkNotNull(id, "id");
         ValidationUtils.checkNotNull(request, "request");
-        return httpClient.put(BASE + "/" + id, request, WhatsAppSmartLinkResponse.class);
+        return httpClient.put(BASE + "/" + QueryString.encodePathSegment(id), request, WhatsAppSmartLinkResponse.class);
     }
 
     /**
@@ -62,7 +63,8 @@ public class SmartLinkService {
      * Returns click stats for a smart link. GET /v1/smart-links/whatsapp/{id}/stats
      */
     public Map<String, Object> stats(String id) {
-        return httpClient.get(BASE + "/" + id + "/stats", new TypeReference<Map<String, Object>>() {
+        ValidationUtils.checkNotNull(id, "id");
+        return httpClient.get(BASE + "/" + QueryString.encodePathSegment(id) + "/stats", new TypeReference<Map<String, Object>>() {
         });
     }
 }
