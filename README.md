@@ -39,7 +39,9 @@ Cada versão também sai no GitHub Packages (`https://maven.pkg.github.com/arara
 
 A API confere a permissão da chave em cada chamada. Envio, templates, campanhas e números funcionam com as permissões específicas (`MESSAGES_SEND`, `TEMPLATES_WRITE`, `CAMPAIGNS_SEND`, `READ`).
 
-**Exigem chave ADMIN:** `auth().me()`, `contacts`, `conversations`, `wallet`, `optOuts` e `organizations` (perfil comercial e plano). Com chave sem ADMIN, essas chamadas lançam `AraraAuthException` (403).
+**Exigem chave ADMIN:** `getAuth().me()`, `contacts`, `conversations`, `wallet`, `optOuts` e `organizations` (perfil comercial e plano). Com chave sem ADMIN, essas chamadas lançam `AraraAuthException` (403).
+
+`getMessages().getById(id)` com 403 de corpo vazio significa mensagem de outra conta (ou inexistente para essa chave): o SDK lança `AraraApiException` com `getCode()` = `NOT_FOUND` e status 403, não erro de autenticação.
 
 Gerenciar chaves de API e o webhook da organização não é possível por chave: faça pelo painel.
 
@@ -57,18 +59,20 @@ MessageResponse sent = arara.getMessages().send(SendMessageRequest.builder()
         .build());
 ```
 
+Uma chave de idempotência em branco é recusada com `AraraException`; espaços nas pontas são removidos.
+
 O `receiver` aceita `whatsapp:+5511999998888`, `+5511999998888` ou só os dígitos (7 a 15 dígitos, mesma regra da API).
 
 ### Idempotência e retry
 
-`messages().send`, `messages().sendBatch` e `campaigns().create` **sempre** mandam o header `Idempotency-Key`. Sem chave sua, o SDK gera um UUID v4 por chamada e reutiliza a mesma chave em todos os retries dela, então um timeout nunca vira envio duplicado. Para retentar por conta própria (por exemplo, depois de reiniciar o processo), passe a sua chave:
+`getMessages().send`, `getMessages().sendBatch` e `getCampaigns().create` **sempre** mandam o header `Idempotency-Key`. Sem chave sua, o SDK gera um UUID v4 por chamada e reutiliza a mesma chave em todos os retries dela, então um timeout nunca vira envio duplicado. Para retentar por conta própria (por exemplo, depois de reiniciar o processo), passe a sua chave:
 
 ```java
 arara.getMessages().send(request, "pedido-4521-lembrete");
 arara.getCampaigns().create(campaign, "campanha-black-friday");
 ```
 
-O retry automático (padrão 3, `maxRetries`) cobre falha de rede, 5xx e 429, e honra `Retry-After`. POST e PATCH sem `Idempotency-Key` **nunca** são repetidos; GET, PUT e DELETE sim.
+O retry automático (padrão 3, `maxRetries`) cobre falha de rede, 5xx e 429, e honra `Retry-After` até 30 s; acima disso não espera e lança a exceção com `getRetryAfter()`. POST e PATCH sem `Idempotency-Key` **nunca** são repetidos; GET, PUT e DELETE sim.
 
 ## Recursos
 
@@ -99,9 +103,9 @@ UUID id = page.getData().get(0).getId();
 
 A API não usa um formato só, e o SDK segue cada endpoint:
 
-- `templates().list` e `smartLinks().list` → `PaginatedResponse<T>` com `getData()` e `getPagination()` (`page`, `size`, `totalElements`, `totalPages`).
-- `campaigns().list` → `CampaignPage` e `wallet().transactions` → `WalletTransactionPage`, ambos com `getContent()`, `getTotalPages()`, `getTotalElements()`.
-- `contacts().list` → `ContactsListResponse` (`contacts`, `total`, `page`, `size`, `totalPages`).
+- `getTemplates().list` e `getSmartLinks().list` → `PaginatedResponse<T>` com `getData()` e `getPagination()` (`page`, `size`, `totalElements`, `totalPages`).
+- `getCampaigns().list` → `CampaignPage` e `getWallet().transactions` → `WalletTransactionPage`, ambos com `getContent()`, `getTotalPages()`, `getTotalElements()`.
+- `getContacts().list` → `ContactsListResponse` (`contacts`, `total`, `page`, `size`, `totalPages`).
 
 ## Erros
 

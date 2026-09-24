@@ -13,18 +13,22 @@ Alinha o SDK com a API real por chave de API. Tem mudanças incompatíveis.
 - POST e PATCH sem `Idempotency-Key` não são mais repetidos pelo retry automático.
 
 ### Corrigido
-- `messages().send` e `campaigns().create` sempre mandam `Idempotency-Key` (UUID v4 gerado ou o seu), reutilizado nos retries: timeout ou 5xx não vira envio duplicado e cobrado.
+- `getMessages().send` e `getCampaigns().create` sempre mandam `Idempotency-Key` (UUID v4 gerado ou o seu), reutilizado nos retries: timeout ou 5xx não vira envio duplicado e cobrado.
 - `receiver` aceita `whatsapp:+55...`, `+55...` e só dígitos, com a regra da API (7 a 15 dígitos).
 - Filtros de contatos e conversas e telefones no path são codificados na URL (`&`, `#`, `+` não corrompem mais a query).
 - Erro do filtro de chave no formato padrão do Spring (`{timestamp,status,error,path}`) é lido como falha de autenticação, não como código de negócio.
+- `getMessages().getById` com 403 de corpo vazio vira `AraraApiException` `NOT_FOUND` (mensagem de outra conta), não erro de chave.
+- `Retry-After` acima de 30 s não segura a thread: a exceção sai com `getRetryAfter()`.
+- Chave de idempotência em branco e api key em branco são recusadas; item nulo em lote ou campanha falha com o índice.
 - `AraraApiException` expõe `getCode()`, `getDetails()` e `getRetryAfter()` (também em 503).
 
 ### Novo
-- `messages().sendBatch` (`POST /v1/messages/batch`, até 1000) e `messages().listByBatch`.
-- `campaigns().list` (`CampaignPage`) e `campaigns().cancel`; `CampaignRequest.scheduledAt`.
-- `templates().list(name, status, page, size)` e `templates().analytics(...)`; `CreateTemplateRequest.headerType`.
+- `getMessages().sendBatch` (`POST /v1/messages/batch`, até 1000) e `getMessages().listByBatch`.
+- `getCampaigns().list` (`CampaignPage`) e `getCampaigns().cancel`; `CampaignRequest.scheduledAt`.
+- `getTemplates().list(name, status, page, size)` e `getTemplates().analytics(...)`; `CreateTemplateRequest.headerType`.
 - `getOptOuts()` (`/v1/opt-outs`).
-- `MessageResponse.reason`.
+- `MessageResponse.reason`; `CampaignResponse.scheduledAt`; `CampaignListItem.scheduledAt/createdAt`.
+- `getCampaigns().getById` devolve `CampaignDetail` (contadores de entrega, leitura, clique, conversão, bloqueio e estorno, `startedAt`, `finishedAt`).
 - Publicação no Maven Central (assinada), além do GitHub Packages.
 
 ## 1.8.1 (2026-07-14)
