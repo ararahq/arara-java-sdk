@@ -4,8 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
-  release:
-    types: [created]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -23,23 +26,76 @@ jobs:
         run: ./gradlew build
 
   publish:
-    if: github.event_name == 'release'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(grep '^araraSdkVersion=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+          GROUP_PATH=$(grep '^araraSdkGroup=' gradle.properties | cut -d= -f2 | tr -d '[:space:]' | tr . /)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "group_path=$GROUP_PATH" >> "$GITHUB_OUTPUT"
+      - name: Check if version already exists on Maven Central
+        id: check
+        run: |
+          URL="https://repo1.maven.org/maven2/${{ steps.version.outputs.group_path }}/arara-java-sdk/${{ steps.version.outputs.version }}/arara-java-sdk-${{ steps.version.outputs.version }}.pom"
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$URL")
+          if [ "$STATUS" = "200" ]; then
+            echo "Version ${{ steps.version.outputs.version }} already on Maven Central. Skipping publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          elif [ "$STATUS" = "404" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Unexpected status $STATUS from Maven Central." >&2
+            exit 1
+          fi
       - name: Set up JDK 17
+        if: steps.check.outputs.publish == 'true'
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
       - name: Setup Gradle
+        if: steps.check.outputs.publish == 'true'
         uses: gradle/actions/setup-gradle@v4
+      - name: Publish to Maven Central (signed)
+        if: steps.check.outputs.publish == 'true'
+        run: ./gradlew publishAndReleaseToMavenCentral --no-configuration-cache
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
       - name: Publish to GitHub Packages
-        run: ./gradlew publishMavenJavaPublicationToGitHubPackagesRepository
+        if: steps.check.outputs.publish == 'true'
+        run: ./gradlew publishMavenPublicationToGitHubPackagesRepository
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ github.token }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
+      - name: Create tag and GitHub release
+        if: steps.check.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists."
+          else
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists."
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi

@@ -1,6 +1,7 @@
 plugins {
     id 'java-library'
     id 'maven-publish'
+    id 'com.vanniktech.maven.publish' version '0.34.0'
     id 'jacoco'
     id "io.freefair.lombok" version "8.6"
 }
@@ -12,8 +13,6 @@ java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(Integer.parseInt(project.javaVersion))
     }
-    withSourcesJar()
-    withJavadocJar()
 }
 
 repositories {
@@ -84,34 +83,46 @@ tasks.jacocoTestCoverageVerification {
 
 check.dependsOn jacocoTestCoverageVerification
 
-// Maven publication configuration
-publishing {
-    publications {
-        mavenJava(MavenPublication) {
-            from components.java
-            
-            pom {
-                name = 'Arara Java SDK'
-                description = 'Official SDK for integrating with the Arara platform'
-                url = 'https://github.com/ararahq/arara-java-sdk'
-                licenses {
-                    license {
-                        name = 'MIT License'
-                        url = 'https://opensource.org/licenses/MIT'
-                    }
-                }
-                developers {
-                    developer {
-                        id = 'ararahq'
-                        name = 'Arara HQ'
-                        email = 'suporte@ararahq.com'
-                    }
-                }
+// Maven Central (Sonatype Central Portal) + GitHub Packages.
+// Central credentials: ORG_GRADLE_PROJECT_mavenCentralUsername / ORG_GRADLE_PROJECT_mavenCentralPassword.
+// Signing: ORG_GRADLE_PROJECT_signingInMemoryKey / ORG_GRADLE_PROJECT_signingInMemoryKeyPassword.
+mavenPublishing {
+    publishToMavenCentral()
+    if (project.findProperty('signingInMemoryKey')) {
+        signAllPublications()
+    }
+    coordinates(project.araraSdkGroup, rootProject.name, project.araraSdkVersion)
+
+    pom {
+        name = 'Arara Java SDK'
+        description = 'Official Java SDK for the Arara WhatsApp messaging API'
+        inceptionYear = '2025'
+        url = 'https://github.com/ararahq/arara-java-sdk'
+        licenses {
+            license {
+                name = 'MIT License'
+                url = 'https://opensource.org/licenses/MIT'
+                distribution = 'repo'
             }
         }
+        developers {
+            developer {
+                id = 'ararahq'
+                name = 'Arara HQ'
+                email = 'suporte@ararahq.com'
+                url = 'https://ararahq.com'
+            }
+        }
+        scm {
+            url = 'https://github.com/ararahq/arara-java-sdk'
+            connection = 'scm:git:git://github.com/ararahq/arara-java-sdk.git'
+            developerConnection = 'scm:git:ssh://git@github.com/ararahq/arara-java-sdk.git'
+        }
     }
+}
+
+publishing {
     repositories {
-        mavenLocal()
         maven {
             name = "GitHubPackages"
             url = uri("https://maven.pkg.github.com/ararahq/arara-java-sdk")
