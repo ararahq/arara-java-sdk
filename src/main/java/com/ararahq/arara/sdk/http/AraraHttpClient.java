@@ -6,6 +6,7 @@ import com.ararahq.arara.sdk.exceptions.AraraAuthException;
 import com.ararahq.arara.sdk.exceptions.AraraException;
 import com.ararahq.arara.sdk.exceptions.AraraNetworkException;
 import com.ararahq.arara.sdk.exceptions.AraraRateLimitException;
+import com.ararahq.arara.sdk.exceptions.PlanFeatureLockedException;
 import com.ararahq.arara.sdk.interceptors.AuthInterceptor;
 import com.ararahq.arara.sdk.interceptors.RetryInterceptor;
 import com.ararahq.arara.sdk.models.AraraError;
@@ -13,6 +14,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -23,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Map;
 
 /**
@@ -31,6 +35,13 @@ import java.util.Map;
 public class AraraHttpClient {
     private static final Logger log = LoggerFactory.getLogger(AraraHttpClient.class);
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
+    private static final int HTTP_UNAUTHORIZED = 401;
+    private static final int HTTP_FORBIDDEN = 403;
+    private static final int HTTP_TOO_MANY_REQUESTS = 429;
+    private static final String RETRY_AFTER_HEADER = "Retry-After";
+    private static final TypeReference<Map<String, Object>> DETAILS_TYPE =
+            new TypeReference<Map<String, Object>>() {
+            };
 
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -40,7 +51,9 @@ public class AraraHttpClient {
         this.baseUrl = config.getBaseUrl();
         this.objectMapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
-                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+                .configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false)
+                .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(config.getConnectTimeout())
@@ -70,71 +83,95 @@ public class AraraHttpClient {
      * Performs a POST request with JSON body.
      */
     public <T> T post(String path, Object body, Class<T> responseType) {
-        return execute(buildBody("POST", path, body), responseType);
+        return execute(buildBody("POST", path, body, Collections.emptyMap()), responseType);
+    }
+
+    /**
+     * Performs a POST request with JSON body and extra headers (e.g. Idempotency-Key).
+     */
+    public <T> T post(String path, Object body, Map<String, String> headers, Class<T> responseType) {
+        return execute(buildBody("POST", path, body, headers), responseType);
     }
 
     /**
      * Performs a POST request with a generic response type.
      */
     public <T> T post(String path, Object body, TypeReference<T> responseType) {
-        return execute(buildBody("POST", path, body), responseType);
+        return execute(buildBody("POST", path, body, Collections.emptyMap()), responseType);
     }
 
     /**
      * Performs a PUT request with JSON body.
      */
     public <T> T put(String path, Object body, Class<T> responseType) {
-        return execute(buildBody("PUT", path, body), responseType);
+        return execute(buildBody("PUT", path, body, Collections.emptyMap()), responseType);
     }
 
     /**
      * Performs a PUT request with a generic response type.
      */
     public <T> T put(String path, Object body, TypeReference<T> responseType) {
-        return execute(buildBody("PUT", path, body), responseType);
+        return execute(buildBody("PUT", path, body, Collections.emptyMap()), responseType);
     }
 
     /**
      * Performs a PATCH request with JSON body.
      */
     public <T> T patch(String path, Object body, Class<T> responseType) {
-        return execute(buildBody("PATCH", path, body), responseType);
+        return execute(buildBody("PATCH", path, body, Collections.emptyMap()), responseType);
     }
 
     /**
      * Performs a PATCH request with a generic response type.
      */
     public <T> T patch(String path, Object body, TypeReference<T> responseType) {
-        return execute(buildBody("PATCH", path, body), responseType);
+        return execute(buildBody("PATCH", path, body, Collections.emptyMap()), responseType);
     }
 
     /**
-     * Performs a DELETE request.
+     * Performs a DELETE request, discarding the response body.
      */
     public void delete(String path) {
-        Request request = new Request.Builder()
-                .url(baseUrl + path)
-                .delete()
-                .build();
-        execute(request, Void.class);
+        execute(buildDelete(path), Void.class);
+    }
+
+    /**
+     * Performs a DELETE request with a generic response type.
+     */
+    public <T> T delete(String path, TypeReference<T> responseType) {
+        return execute(buildDelete(path), responseType);
+    }
+
+    private String url(String path) {
+        boolean baseEndsWithSlash = baseUrl.endsWith("/");
+        boolean pathStartsWithSlash = path.startsWith("/");
+        if (baseEndsWithSlash && pathStartsWithSlash) {
+            return baseUrl + path.substring(1);
+        }
+        if (!baseEndsWithSlash && !pathStartsWithSlash) {
+            return baseUrl + "/" + path;
+        }
+        return baseUrl + path;
     }
 
     private Request buildGet(String path) {
-        return new Request.Builder()
-                .url(baseUrl + path)
-                .get()
-                .build();
+        return new Request.Builder().url(url(path)).get().build();
     }
 
-    private Request buildBody(String method, String path, Object body) {
+    private Request buildDelete(String path) {
+        return new Request.Builder().url(url(path)).delete().build();
+    }
+
+    private Request buildBody(String method, String path, Object body, Map<String, String> headers) {
         try {
             RequestBody requestBody = body == null
                     ? RequestBody.create("", JSON)
                     : RequestBody.create(objectMapper.writeValueAsString(body), JSON);
-            return new Request.Builder()
-                    .url(baseUrl + path)
-                    .method(method, requestBody)
-                    .build();
+            Request.Builder builder = new Request.Builder()
+                    .url(url(path))
+                    .method(method, requestBody);
+            headers.forEach(builder::header);
+            return builder.build();
         } catch (IOException e) {
             throw new AraraException("Error serializing object to JSON", e);
         }
@@ -171,32 +208,36 @@ public class AraraHttpClient {
     private String call(Request request, boolean discardBody) {
         try (Response response = httpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                handleErrorResponse(response);
+                throw toException(response);
             }
             if (discardBody || response.body() == null) {
                 return null;
             }
             return response.body().string();
         } catch (IOException e) {
-            log.error("Network error accessing Arara API: {}", request.url(), e);
+            log.error("Network error accessing Arara API. [url={}, reason={}]", request.url(), e.getMessage());
             throw new AraraNetworkException("Communication failure with Arara API", e);
         }
     }
 
-    private void handleErrorResponse(Response response) throws IOException {
+    private AraraApiException toException(Response response) throws IOException {
         String body = response.body() != null ? response.body().string() : "";
         AraraError errorDetails = parseError(body);
+        String code = errorDetails != null ? errorDetails.getCode() : null;
+        int status = response.code();
 
-        int code = response.code();
-        if (code == 401 || code == 403) {
-            throw new AraraAuthException(errorDetails != null ? errorDetails.getMessage() : "Unauthorized");
+        if (status == HTTP_UNAUTHORIZED || (status == HTTP_FORBIDDEN && code == null)) {
+            return new AraraAuthException(status, errorDetails);
         }
-        if (code == 429) {
-            throw new AraraRateLimitException(errorDetails,
-                    RetryInterceptor.parseRetryAfter(response.header("Retry-After")));
+        if (status == HTTP_FORBIDDEN && PlanFeatureLockedException.CODE.equals(code)) {
+            return new PlanFeatureLockedException(errorDetails);
         }
-
-        throw new AraraApiException(code, errorDetails);
+        if (status == HTTP_TOO_MANY_REQUESTS) {
+            return new AraraRateLimitException(errorDetails,
+                    RetryInterceptor.parseRetryAfter(response.header(RETRY_AFTER_HEADER)));
+        }
+        return new AraraApiException(status, errorDetails,
+                RetryInterceptor.parseRetryAfter(response.header(RETRY_AFTER_HEADER)));
     }
 
     private AraraError parseError(String body) {
@@ -208,22 +249,37 @@ public class AraraHttpClient {
             JsonNode error = root.path("error");
             if (error.isObject()) {
                 return AraraError.builder()
-                        .code(error.path("code").asText(null))
-                        .message(error.path("message").asText(null))
+                        .code(textOrNull(error.path("code")))
+                        .message(textOrNull(error.path("message")))
                         .details(error.path("details").isObject()
-                                ? objectMapper.convertValue(error.path("details"),
-                                        new TypeReference<Map<String, Object>>() {
-                                        })
+                                ? objectMapper.convertValue(error.path("details"), DETAILS_TYPE)
                                 : null)
                         .build();
             }
+            if (isSpringDefaultError(root)) {
+                String message = textOrNull(root.path("message"));
+                return AraraError.builder()
+                        .message(message != null ? message : textOrNull(error))
+                        .build();
+            }
             return AraraError.builder()
-                    .code(error.isTextual() ? error.asText() : null)
-                    .message(root.path("message").asText(null))
+                    .code(textOrNull(error))
+                    .message(textOrNull(root.path("message")))
                     .build();
-        } catch (Exception e) {
-            log.warn("Could not parse API error: {}", body);
+        } catch (IOException | IllegalArgumentException e) {
+            log.warn("Could not parse API error body. [reason={}]", e.getMessage());
             return null;
         }
+    }
+
+    private static boolean isSpringDefaultError(JsonNode root) {
+        return root.has("timestamp") || root.has("path");
+    }
+
+    private static String textOrNull(JsonNode node) {
+        if (node == null || !node.isTextual() || node.asText().isBlank()) {
+            return null;
+        }
+        return node.asText();
     }
 }

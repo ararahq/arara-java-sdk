@@ -5,10 +5,12 @@ import com.ararahq.arara.sdk.exceptions.AraraApiException;
 import com.ararahq.arara.sdk.exceptions.AraraAuthException;
 import com.ararahq.arara.sdk.exceptions.AraraNetworkException;
 import com.ararahq.arara.sdk.exceptions.AraraRateLimitException;
+import com.ararahq.arara.sdk.exceptions.PlanFeatureLockedException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
+import okhttp3.mockwebserver.SocketPolicy;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -20,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -79,6 +82,147 @@ class AraraHttpClientTest {
     void shouldHandle401() {
         mockWebServer.enqueue(new MockResponse().setResponseCode(401));
         assertThrows(AraraAuthException.class, () -> client.get("test", TestResponse.class));
+    }
+
+    @Test
+    @DisplayName("should map 403 without error code to auth exception")
+    void shouldMap403WithoutCodeToAuth() {
+        mockWebServer.enqueue(new MockResponse().setResponseCode(403));
+
+        AraraAuthException exception = assertThrows(AraraAuthException.class,
+                () -> client.get("test", TestResponse.class));
+
+        assertEquals(403, exception.getStatusCode());
+        assertNull(exception.getCode());
+    }
+
+    @Test
+    @DisplayName("should map 403 PLAN_FEATURE_LOCKED to typed exception with details")
+    void shouldMapPlanFeatureLocked() {
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(403)
+                .setBody("{\"error\":{\"code\":\"PLAN_FEATURE_LOCKED\","
+                        + "\"message\":\"Essa feature está liberada a partir do plano VOO.\","
+                        + "\"details\":{\"feature\":\"canUseFlows\",\"currentPlan\":\"DECOLAGEM\","
+                        + "\"upgradeTo\":\"VOO\"}}}"));
+
+        PlanFeatureLockedException exception = assertThrows(PlanFeatureLockedException.class,
+                () -> client.get("test", TestResponse.class));
+
+        assertEquals(403, exception.getStatusCode());
+        assertEquals("PLAN_FEATURE_LOCKED", exception.getCode());
+        assertEquals("canUseFlows", exception.getFeature());
+        assertEquals("DECOLAGEM", exception.getCurrentPlan());
+        assertEquals("VOO", exception.getUpgradeTo());
+    }
+
+    @Test
+    @DisplayName("should keep 403 with business code as API exception, not auth")
+    void shouldKeep403WithCodeAsApiException() {
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(403)
+                .setBody("{\"error\":{\"code\":\"NO_DEDICATED_NUMBER\",\"message\":\"x\",\"details\":{}}}"));
+
+        AraraApiException exception = assertThrows(AraraApiException.class,
+                () -> client.get("test", TestResponse.class));
+
+        assertFalse(exception instanceof AraraAuthException);
+        assertFalse(exception instanceof PlanFeatureLockedException);
+        assertEquals("NO_DEDICATED_NUMBER", exception.getCode());
+        assertTrue(exception.getDetails().isEmpty());
+    }
+
+    @Test
+    @DisplayName("should treat Spring default 403 body as auth failure")
+    void shouldTreatSpringDefault403AsAuth() {
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(403)
+                .setBody("{\"timestamp\":\"2026-09-24T00:00:00Z\",\"status\":403,"
+                        + "\"error\":\"Forbidden\",\"path\":\"/v1/wallet\"}"));
+
+        AraraAuthException exception = assertThrows(AraraAuthException.class,
+                () -> client.get("test", TestResponse.class));
+
+        assertEquals("Forbidden", exception.getMessage());
+    }
+
+    @Test
+    @DisplayName("should expose Retry-After on 503")
+    void shouldExposeRetryAfterOn503() {
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(503)
+                .setHeader("Retry-After", "12")
+                .setBody("{\"error\":{\"code\":\"SEND_TEMPORARILY_UNAVAILABLE\",\"message\":\"x\"}}"));
+
+        AraraApiException exception = assertThrows(AraraApiException.class,
+                () -> client.get("test", TestResponse.class));
+
+        assertEquals(Duration.ofSeconds(12), exception.getRetryAfter());
+        assertEquals("SEND_TEMPORARILY_UNAVAILABLE", exception.getCode());
+    }
+
+    @Test
+    @DisplayName("should never retry POST without Idempotency-Key")
+    void shouldNotRetryPostWithoutIdempotencyKey() {
+        AraraHttpClient retryingClient = clientWithRetries(3);
+        mockWebServer.enqueue(new MockResponse().setResponseCode(500));
+
+        assertThrows(AraraApiException.class,
+                () -> retryingClient.post("test", Map.of("k", "v"), TestResponse.class));
+        assertEquals(1, mockWebServer.getRequestCount());
+    }
+
+    @Test
+    @DisplayName("should never retry PATCH on network failure")
+    void shouldNotRetryPatchOnNetworkFailure() throws IOException {
+        AraraHttpClient retryingClient = clientWithRetries(3);
+        mockWebServer.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START));
+
+        assertThrows(AraraNetworkException.class,
+                () -> retryingClient.patch("test", Map.of("k", "v"), TestResponse.class));
+        assertEquals(1, mockWebServer.getRequestCount());
+    }
+
+    @Test
+    @DisplayName("should retry POST with Idempotency-Key keeping the same key")
+    void shouldRetryPostWithIdempotencyKey() throws InterruptedException {
+        AraraHttpClient retryingClient = clientWithRetries(1);
+        mockWebServer.enqueue(new MockResponse().setResponseCode(502));
+        mockWebServer.enqueue(new MockResponse().setResponseCode(200).setBody("{\"name\":\"Ok\"}"));
+
+        TestResponse response = retryingClient.post("test", Map.of("k", "v"),
+                Map.of("Idempotency-Key", "abc"), TestResponse.class);
+
+        assertEquals("Ok", response.name);
+        assertEquals("abc", mockWebServer.takeRequest().getHeader("Idempotency-Key"));
+        assertEquals("abc", mockWebServer.takeRequest().getHeader("Idempotency-Key"));
+    }
+
+    @Test
+    @DisplayName("should join base URL without trailing slash and path")
+    void shouldJoinBaseUrlWithoutTrailingSlash() throws InterruptedException {
+        String base = mockWebServer.url("/").toString();
+        AraraHttpClient noSlash = new AraraHttpClient(AraraConfig.builder()
+                .baseUrl(base.substring(0, base.length() - 1)).apiKey("k").maxRetries(0).build());
+        mockWebServer.enqueue(new MockResponse().setResponseCode(200).setBody("{\"name\":\"a\"}"));
+        mockWebServer.enqueue(new MockResponse().setResponseCode(200).setBody("{\"name\":\"b\"}"));
+
+        noSlash.get("/v1/x", TestResponse.class);
+        noSlash.get("v1/y", TestResponse.class);
+
+        assertEquals("/v1/x", mockWebServer.takeRequest().getPath());
+        assertEquals("/v1/y", mockWebServer.takeRequest().getPath());
+    }
+
+    @Test
+    @DisplayName("should DELETE with generic response type")
+    void shouldDeleteWithTypeReference() {
+        mockWebServer.enqueue(new MockResponse().setResponseCode(200).setBody("{\"removed\":true}"));
+
+        Map<String, Object> response = client.delete("test", new TypeReference<Map<String, Object>>() {
+        });
+
+        assertEquals(true, response.get("removed"));
     }
 
     @Test
