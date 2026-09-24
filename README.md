@@ -4,371 +4,150 @@
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![Docs](https://img.shields.io/badge/Docs-docs.ararahq.com-orange)](https://docs.ararahq.com)
 
-SDK oficial em Java para integração com a **Plataforma WhatsApp Business Arara**.
-
-## Sobre
-
-O Arara Java SDK é uma biblioteca leve e type-safe para integração perfeita com os serviços de mensagens WhatsApp, gerenciamento de campanhas e usuários da Arara. Construa aplicações robustas de mensagens em Java com o mínimo de esforço.
-
-### Funcionalidades
-
-- 📱 **Serviço de Mensagens** - Envie mensagens WhatsApp (templates e texto livre)
-- 📊 **Serviço de Campanhas** - Crie e gerencie campanhas de mensagens em massa
-- 👤 **Serviço de Usuários** - Acesse e atualize informações do usuário autenticado
-- 📝 **Serviço de Templates** - Crie, gerencie e consulte o status de templates WhatsApp
-- ✅ **Validação Robusta** - Validação de requisições com mensagens de erro claras
-- 🔐 **Autenticação Segura** - Gerenciamento automático de chave API via interceptadores
-- 📦 **Type-Safe** - Segurança de tipos completa com padrão builder
-- 🧪 **Bem Testado** - 66 testes unitários com 80% de cobertura
-- 📖 **Documentação Completa** - Javadoc abrangente para todas as APIs públicas
+SDK oficial em Java para a API de mensagens WhatsApp da **Arara**.
 
 ## Requisitos
 
-- **Java**: 17 ou superior
-- **Gradle**: 7.0 ou superior (ou use o wrapper incluído)
-- **Chave de API**: Chave de API válida da Arara do seu painel de controle
+- Java 17 ou superior
+- Chave de API da Arara (painel → Configurações → Chaves de API)
 
 ## Instalação
 
-O SDK é distribuído via **GitHub Packages** (não está publicado no Maven Central). O GitHub Packages exige autenticação mesmo para leitura: use seu usuário do GitHub e um personal access token com escopo `read:packages`.
+A partir da 2.0.0 o SDK é publicado no **Maven Central**, sem repositório extra nem token.
 
-### Usando Gradle
-
-Adicione o repositório e a dependência ao seu `build.gradle`:
+Gradle:
 
 ```gradle
-repositories {
-    mavenCentral()
-    maven {
-        name = "GitHubPackages"
-        url = uri("https://maven.pkg.github.com/ararahq/arara-java-sdk")
-        credentials {
-            username = System.getenv("GITHUB_ACTOR") ?: project.findProperty("gpr.user")
-            password = System.getenv("GITHUB_TOKEN") ?: project.findProperty("gpr.key")
-        }
-    }
-}
-
 dependencies {
-    implementation 'com.ararahq:arara-java-sdk:1.8.1'
+    implementation 'com.ararahq:arara-java-sdk:2.0.0'
 }
 ```
 
-Defina as credenciais em `~/.gradle/gradle.properties` (`gpr.user` e `gpr.key`) ou nas variáveis de ambiente `GITHUB_ACTOR` e `GITHUB_TOKEN`.
-
-### Usando Maven
-
-Adicione o repositório ao seu `pom.xml`:
+Maven:
 
 ```xml
-<repositories>
-    <repository>
-        <id>github</id>
-        <url>https://maven.pkg.github.com/ararahq/arara-java-sdk</url>
-    </repository>
-</repositories>
-
 <dependency>
     <groupId>com.ararahq</groupId>
     <artifactId>arara-java-sdk</artifactId>
-    <version>1.8.1</version>
+    <version>2.0.0</version>
 </dependency>
 ```
 
-E as credenciais no `~/.m2/settings.xml`:
+Cada versão também sai no GitHub Packages (`https://maven.pkg.github.com/ararahq/arara-java-sdk`), que exige token com `read:packages` até para leitura.
 
-```xml
-<servers>
-    <server>
-        <id>github</id>
-        <username>SEU_USUARIO_GITHUB</username>
-        <password>SEU_TOKEN_COM_READ_PACKAGES</password>
-    </server>
-</servers>
-```
+## Permissões da chave
 
-## Início Rápido
+A API confere a permissão da chave em cada chamada. Envio, templates, campanhas e números funcionam com as permissões específicas (`MESSAGES_SEND`, `TEMPLATES_WRITE`, `CAMPAIGNS_SEND`, `READ`).
 
-### 1. Inicializar o SDK
+**Exigem chave ADMIN:** `auth().me()`, `contacts`, `conversations`, `wallet`, `optOuts` e `organizations` (perfil comercial e plano). Com chave sem ADMIN, essas chamadas lançam `AraraAuthException` (403).
 
-```java
-import com.ararahq.arara.sdk.Arara;
+Gerenciar chaves de API e o webhook da organização não é possível por chave: faça pelo painel.
 
-// Criar o cliente
-Arara arara = Arara.builder()
-    .apiKey("sua-chave-api-aqui")
-    .baseUrl("https://api.ararahq.com")
-    .build();
-```
-
-Timeouts e retries são configuráveis no builder (valores abaixo são os defaults):
+## Início rápido
 
 ```java
 Arara arara = Arara.builder()
-    .apiKey("sua-chave-api-aqui")
-    .connectTimeout(Duration.ofSeconds(10))
-    .readTimeout(Duration.ofSeconds(30))
-    .writeTimeout(Duration.ofSeconds(30))
-    .callTimeout(Duration.ofMinutes(2))
-    .maxRetries(3)
-    .build();
+        .apiKey(System.getenv("ARARA_API_KEY"))
+        .build();
+
+MessageResponse sent = arara.getMessages().send(SendMessageRequest.builder()
+        .receiver("+5511999998888")
+        .templateName("boas_vindas")
+        .templateVariables(List.of("Ana"))
+        .build());
 ```
 
-Falhas de rede, respostas 5xx e 429 são reenviadas automaticamente com backoff exponencial até `maxRetries`, honrando o header `Retry-After` quando presente.
+O `receiver` aceita `whatsapp:+5511999998888`, `+5511999998888` ou só os dígitos (7 a 15 dígitos, mesma regra da API).
 
-### 2. Enviar uma Mensagem
+### Idempotência e retry
+
+`messages().send`, `messages().sendBatch` e `campaigns().create` **sempre** mandam o header `Idempotency-Key`. Sem chave sua, o SDK gera um UUID v4 por chamada e reutiliza a mesma chave em todos os retries dela, então um timeout nunca vira envio duplicado. Para retentar por conta própria (por exemplo, depois de reiniciar o processo), passe a sua chave:
 
 ```java
-import com.ararahq.arara.sdk.models.SendMessageRequest;
-import com.ararahq.arara.sdk.models.MessageResponse;
-
-// Enviar uma mensagem de texto livre
-SendMessageRequest request = SendMessageRequest.builder()
-    .receiver("whatsapp:+5511999998888")
-    .body("Olá! Esta é uma mensagem de teste.")
-    .mediaUrl("https://ararahq.com/l/FtFmja") // Opcional: Imagem/PDF
-    .build();
-
-MessageResponse response = arara.getMessages().send(request);
-System.out.println("ID da Mensagem: " + response.getId());
-System.out.println("Status: " + response.getStatus());
+arara.getMessages().send(request, "pedido-4521-lembrete");
+arara.getCampaigns().create(campaign, "campanha-black-friday");
 ```
 
-### 3. Enviar uma Mensagem com Template
+O retry automático (padrão 3, `maxRetries`) cobre falha de rede, 5xx e 429, e honra `Retry-After`. POST e PATCH sem `Idempotency-Key` **nunca** são repetidos; GET, PUT e DELETE sim.
+
+## Recursos
+
+| Serviço | Métodos | Endpoint |
+|---|---|---|
+| `getMessages()` | `send`, `sendBatch` (até 1000), `getById`, `listByBatch` | `/v1/messages` |
+| `getCampaigns()` | `create`, `list`, `getById`, `cancel` | `/v1/campaigns` |
+| `getTemplates()` | `create`, `list`, `getById`, `getStatus`, `delete`, `analytics` | `/v1/templates` |
+| `getSmartLinks()` | `create`, `update`, `list`, `stats` | `/v1/smart-links/whatsapp` |
+| `getNumbers()` | `list`, `update`, `delete`, `request`, `listRequests`, `sync`, `warming` | `/v1/organizations/me/numbers` |
+| `getAuth()` | `me` (ADMIN) | `/auth/me` |
+| `getContacts()` | `list`, `importBatch`, `stats`, `reactivationCandidates`, `listTags`, `get`, `update`, `messages` (ADMIN) | `/v1/contacts` |
+| `getConversations()` | `list`, `leadStats`, `messages`, `reply`, `updateStatus`, `windowStatus` (ADMIN) | `/v1/conversations` |
+| `getWallet()` | `transactions`, `getAutoRecharge`, `updateAutoRecharge` (ADMIN) | `/v1/wallet` |
+| `getOptOuts()` | `list`, `add`, `get`, `remove` (ADMIN) | `/v1/opt-outs` |
+| `getOrganizations()` | `me`, `updateBusinessProfile`, `getPlan`, `changePlan` (ADMIN) | `/v1/organizations/me` |
+
+### Templates são por id
+
+`getById`, `getStatus`, `delete` e `analytics(id, period)` recebem o **id (UUID)** do template, nunca o nome. Para achar pelo nome, filtre a lista:
 
 ```java
-SendMessageRequest request = SendMessageRequest.builder()
-    .receiver("whatsapp:+5511999998888")
-    .templateName("hello_world")
-    .templateVariables(Arrays.asList("João", "Silva"))
-    .scheduledAt(Instant.parse("2024-12-25T10:00:00Z")) // Opcional: Agendamento
-    .build();
-
-MessageResponse response = arara.getMessages().send(request);
+PaginatedResponse<TemplateResponse> page = arara.getTemplates().list("boas_vindas", "APPROVED", 0, 50);
+UUID id = page.getData().get(0).getId();
 ```
 
-### 4. Criar uma Campanha
+### Paginação
+
+A API não usa um formato só, e o SDK segue cada endpoint:
+
+- `templates().list` e `smartLinks().list` → `PaginatedResponse<T>` com `getData()` e `getPagination()` (`page`, `size`, `totalElements`, `totalPages`).
+- `campaigns().list` → `CampaignPage` e `wallet().transactions` → `WalletTransactionPage`, ambos com `getContent()`, `getTotalPages()`, `getTotalElements()`.
+- `contacts().list` → `ContactsListResponse` (`contacts`, `total`, `page`, `size`, `totalPages`).
+
+## Erros
+
+Toda resposta de erro vira exceção; nada é engolido.
 
 ```java
-import com.ararahq.arara.sdk.models.*;
-import java.util.Arrays;
-
-List<CampaignContactRequest> contacts = Arrays.asList(
-    CampaignContactRequest.builder()
-        .to("whatsapp:+5511999998888")
-        .variables(Arrays.asList("João"))
-        .build(),
-    CampaignContactRequest.builder()
-        .to("whatsapp:+5511988887777")
-        .variables(Arrays.asList("Maria"))
-        .build()
-);
-
-CampaignRequest campaign = CampaignRequest.builder()
-    .name("Campanha de Boas-vindas")
-    .templateName("template_boas_vindas")
-    .sender("whatsapp:+551140001000")
-    .contacts(contacts)
-    .build();
-
-CampaignResponse response = arara.getCampaigns().create(campaign);
-System.out.println("ID da Campanha: " + response.getId());
-System.out.println("Total de Mensagens: " + response.getTotalMessages());
-```
-
-### 5. Obter Informações do Usuário
-
-```java
-UserResponse user = arara.getUsers().me();
-System.out.println("Usuário: " + user.getName());
-System.out.println("Email: " + user.getEmail());
-System.out.println("Papel: " + user.getRole());
-
-// Atualizar informações do meu perfil
-UpdateUserRequest updateRequest = UpdateUserRequest.builder()
-    .name("Novo Nome")
-    .phoneNumber("+5511999998888")
-    .build();
-UserResponse updatedUser = arara.getUsers().updateMe(updateRequest);
-```
-
-### 6. Gerenciar Templates
-
-```java
-import com.ararahq.arara.sdk.models.CreateTemplateRequest;
-import com.ararahq.arara.sdk.models.TemplateResponse;
-import com.ararahq.arara.sdk.models.TemplateStatusResponse;
-
-// Criar um novo template
-CreateTemplateRequest newTemplate = CreateTemplateRequest.builder()
-    .name("boas_vindas_v2")
-    .category("MARKETING")
-    .body("Olá {{1}}, bem-vindo à nossa plataforma!")
-    .build();
-
-TemplateResponse template = arara.getTemplates().create(newTemplate);
-System.out.println("ID: " + template.getId());
-
-// Consultar status de aprovação na Meta
-TemplateStatusResponse status = arara.getTemplates().getStatus(template.getId());
-System.out.println("Status: " + status.getStatus());
-```
-
-## Estrutura do Projeto
-
-```
-src/
-├── main/java/com/ararahq/arara/sdk/
-│   ├── Arara.java                  # Ponto de entrada principal do SDK
-│   ├── config/                     # Classes de configuração
-│   ├── exceptions/                 # Tipos de exceção personalizados
-│   ├── http/                       # Implementação do cliente HTTP
-│   ├── interceptors/               # Interceptadores de requisição/resposta
-│   ├── models/                     # Modelos de requisição/resposta
-│   ├── services/                   # Serviços de lógica de negócio
-│   │   ├── MessageService.java
-│   │   ├── CampaignService.java
-│   │   ├── UserService.java
-│   │   └── TemplateService.java
-│   └── utils/                      # Funções utilitárias
-└── test/java/com/ararahq/arara/sdk/
-    ├── services/                   # Testes unitários dos serviços (38 testes)
-    └── utils/                      # Testes unitários de utilitários (28 testes)
-
-build.gradle                         # Configuração do Gradle
-```
-
-## Executando Testes
-
-### Rodar todos os testes
-
-```bash
-./gradlew test
-```
-
-### Gerar relatório de cobertura de testes
-
-```bash
-./gradlew jacocoTestReport
-```
-
-O relatório de cobertura estará disponível em `build/reports/jacoco/test/html/index.html`
-
-### Rodar uma classe de teste específica
-
-```bash
-./gradlew test --tests MessageServiceTest
-```
-
-## Referência da API
-
-### MessageService
-
-- `send(SendMessageRequest)` - Enviar uma mensagem (template ou texto livre)
-- `getById(String id)` - Recuperar detalhes da mensagem por ID
-
-### CampaignService
-
-- `create(CampaignRequest)` - Criar e iniciar uma nova campanha
-- `getById(UUID id)` - Recuperar detalhes da campanha por ID
-
-### UserService
-
-- `me()` - Obter informações do usuário autenticado atual
-- `updateMe(UpdateUserRequest)` - Atualizar informações do perfil do usuário
-
-### TemplateService
-
-- `create(CreateTemplateRequest)` - Criar e submeter um novo template para o Meta
-- `list()` - Listar todos os templates da conta
-- `getById(UUID id)` - Recuperar detalhes de um template por ID
-- `delete(UUID id)` - Remover um template
-- `getStatus(UUID id)` - Consultar o status de aprovação atual do template
-
-## Tratamento de Erros
-
-O SDK fornece tipos de exceção específicos para melhor tratamento de erros:
-
-```java
-import com.ararahq.arara.sdk.exceptions.*;
-
 try {
-    MessageResponse response = arara.getMessages().send(request);
+    arara.getMessages().send(request);
+} catch (PlanFeatureLockedException e) {
+    // 403 PLAN_FEATURE_LOCKED
+    log.info("Libere {} no plano {} (atual: {})", e.getFeature(), e.getUpgradeTo(), e.getCurrentPlan());
 } catch (AraraAuthException e) {
-    // Tratar erros de autenticação (401, 403)
-    System.err.println("Autenticação falhou: " + e.getMessage());
+    // 401, ou 403 sem código: chave inválida, expirada ou sem permissão
 } catch (AraraRateLimitException e) {
-    // Tratar rate limit (429) após esgotar os retries automáticos
-    System.err.println("Rate limit atingido. Aguarde: " + e.getRetryAfter());
+    // 429 depois dos retries; e.getRetryAfter()
 } catch (AraraApiException e) {
-    // Tratar erros da API com código de status e detalhes
-    System.err.println("Erro da API " + e.getStatusCode() + ": " + e.getMessage());
+    // e.getStatusCode(), e.getCode() (ex.: INVALID_RECIPIENT), e.getMessage(), e.getDetails(), e.getRetryAfter()
 } catch (AraraNetworkException e) {
-    // Tratar erros de rede/timeout
-    System.err.println("Erro de rede: " + e.getMessage());
-} catch (AraraException e) {
-    // Tratar erros gerais do SDK
-    System.err.println("Erro do SDK: " + e.getMessage());
+    // timeout ou falha de conexão
 }
 ```
 
-## Contribuindo
+Um 403 com código de negócio (`NO_DEDICATED_NUMBER`, `PLAN_LIMIT_REACHED`, `RESOURCE_FORBIDDEN`...) é `AraraApiException` com o código, não erro de autenticação.
 
-Agradecemos o interesse em contribuir para o Arara Java SDK! Por favor, siga estas diretrizes:
+## Configuração
 
-### Fluxo de Trabalho
-
-1. **Fork** este repositório
-2. Crie uma **branch de feature**: `git checkout -b feat/sua-feature`
-3. Faça suas alterações e **commit**:
-   - Escreva mensagens de commit claras e descritivas em português ou inglês
-   - Exemplo: `feat: adicionar suporte para agendamento de mensagens`
-4. **Push** para seu fork: `git push origin feat/sua-feature`
-5. Abra um **Pull Request** com uma descrição detalhada
-
-### Padrões de Código
-
-- Siga as convenções Java (CamelCase para classes, camelCase para métodos)
-- Todos os comentários e Javadoc em inglês
-- Adicione testes unitários para novas funcionalidades (alvo 80% de cobertura)
-- Execute os testes antes de enviar: `./gradlew test`
-- Mantenha o código limpo sem comentários desnecessários
-
-### Requisitos de Testes
-
-- Cobertura mínima de 80% do código
-- Todos os testes devem passar: `./gradlew build`
-- Teste novas funcionalidades minuciosamente com cenários positivos e negativos
-
-## Solução de Problemas
-
-### Chave de API Inválida
+```java
+Arara arara = Arara.builder()
+        .apiKey(apiKey)
+        .baseUrl("https://api.ararahq.com")
+        .connectTimeout(Duration.ofSeconds(10))
+        .readTimeout(Duration.ofSeconds(30))
+        .callTimeout(Duration.ofMinutes(2))
+        .maxRetries(3)
+        .build();
 ```
-AraraAuthException: Unauthorized
-```
-- Verifique se sua chave de API está correta
-- Confira se sua chave de API não expirou
-- Garanta que a chave tem as permissões apropriadas
 
-### Formato de Número de Telefone Inválido
-```
-AraraException: Invalid phone number. Must start with 'whatsapp:+'
-```
-- Números de telefone devem estar no formato: `whatsapp:+[código_país][número]`
-- Exemplo: `whatsapp:+5511999998888` (Brasil)
+## Desenvolvimento
 
-### Timeout de Rede
+```bash
+./gradlew build          # compila, roda os testes (contra servidor HTTP fake) e confere cobertura mínima de 80%
+./gradlew jacocoTestReport
 ```
-AraraNetworkException: Communication failure with Arara API
-```
-- Verifique sua conexão com a internet
-- Valide se o endpoint da API está acessível
-- Aumente o timeout se necessário (ajuste na configuração)
+
+A publicação é automática: todo push na `main` com versão nova em `gradle.properties` publica no Maven Central (assinado) e no GitHub Packages, e cria a tag `vX.Y.Z` com release.
 
 ## Licença
 
-Este projeto está licenciado sob a [Licença MIT](LICENSE).
-
-## Suporte
-
-Para dúvidas, problemas ou solicitações de novas funcionalidades, abra uma issue no GitHub ou contate o time Arara em suporte@ararahq.com.
+[MIT](LICENSE). Dúvidas: suporte@ararahq.com.
