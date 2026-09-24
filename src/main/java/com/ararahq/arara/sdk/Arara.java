@@ -37,7 +37,7 @@ public class Arara {
     private final OrganizationService organizations;
 
     private Arara(AraraConfig config) {
-        if (config.getApiKey() == null || config.getApiKey().isEmpty()) {
+        if (config.getApiKey() == null || config.getApiKey().isBlank()) {
             throw new AraraException(
                     "API Key is required to initialize the SDK.");
         }
