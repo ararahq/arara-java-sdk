@@ -4,6 +4,7 @@ import lombok.Builder;
 import lombok.Value;
 import lombok.extern.jackson.Jacksonized;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -18,4 +19,6 @@ public class CampaignResponse {
     String status;
     int totalMessages;
     BigDecimal totalCost;
+    /** Scheduled start; null when sent immediately. */
+    Instant scheduledAt;
 }

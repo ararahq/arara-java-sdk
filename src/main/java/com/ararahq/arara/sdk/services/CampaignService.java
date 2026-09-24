@@ -1,6 +1,8 @@
 package com.ararahq.arara.sdk.services;
 
 import com.ararahq.arara.sdk.http.AraraHttpClient;
+import com.ararahq.arara.sdk.models.CampaignContactRequest;
+import com.ararahq.arara.sdk.models.CampaignDetail;
 import com.ararahq.arara.sdk.models.CampaignPage;
 import com.ararahq.arara.sdk.models.CampaignRequest;
 import com.ararahq.arara.sdk.models.CampaignResponse;
@@ -37,7 +39,11 @@ public class CampaignService {
     public CampaignResponse create(CampaignRequest request, String idempotencyKey) {
         ValidationUtils.checkNotNull(request, "request");
         ValidationUtils.checkNotNull(request.getContacts(), "contacts");
-        request.getContacts().forEach(contact -> ValidationUtils.validateWhatsAppNumber(contact.getTo()));
+        for (int i = 0; i < request.getContacts().size(); i++) {
+            CampaignContactRequest contact = request.getContacts().get(i);
+            ValidationUtils.checkNotNull(contact, "contacts[" + i + "]");
+            ValidationUtils.validateWhatsAppNumber(contact.getTo());
+        }
         return httpClient.post(BASE, request, MessageService.idempotencyHeaders(idempotencyKey),
                 CampaignResponse.class);
     }
@@ -61,9 +67,9 @@ public class CampaignService {
     /**
      * Retrieves campaign details by ID. GET /v1/campaigns/{id}
      */
-    public CampaignResponse getById(UUID id) {
+    public CampaignDetail getById(UUID id) {
         ValidationUtils.checkNotNull(id, "id");
-        return httpClient.get(BASE + "/" + id, CampaignResponse.class);
+        return httpClient.get(BASE + "/" + id, CampaignDetail.class);
     }
 
     /**

@@ -5,6 +5,7 @@ import lombok.Value;
 import lombok.extern.jackson.Jacksonized;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -24,4 +25,6 @@ public class CampaignListItem {
     int readCount;
     int failedCount;
     BigDecimal totalCost;
+    Instant scheduledAt;
+    Instant createdAt;
 }
