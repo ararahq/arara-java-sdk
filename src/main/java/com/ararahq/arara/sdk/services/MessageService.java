@@ -1,8 +1,11 @@
 package com.ararahq.arara.sdk.services;
 
+import com.ararahq.arara.sdk.exceptions.AraraApiException;
+import com.ararahq.arara.sdk.exceptions.AraraAuthException;
 import com.ararahq.arara.sdk.exceptions.AraraException;
 import com.ararahq.arara.sdk.http.AraraHttpClient;
 import com.ararahq.arara.sdk.interceptors.RetryInterceptor;
+import com.ararahq.arara.sdk.models.AraraError;
 import com.ararahq.arara.sdk.models.BatchMessageRequest;
 import com.ararahq.arara.sdk.models.BatchMessageResponse;
 import com.ararahq.arara.sdk.models.MessageResponse;
@@ -20,6 +23,8 @@ import java.util.UUID;
  */
 public class MessageService {
     private static final int MAX_BATCH_SIZE = 1000;
+    private static final int HTTP_FORBIDDEN = 403;
+    public static final String MESSAGE_NOT_FOUND_CODE = "NOT_FOUND";
     private static final TypeReference<List<MessageResponse>> MESSAGE_LIST_TYPE =
             new TypeReference<List<MessageResponse>>() {
             };
@@ -71,17 +76,33 @@ public class MessageService {
             throw new AraraException(
                     "Batch accepts at most " + MAX_BATCH_SIZE + " messages.");
         }
-        request.getMessages().forEach(item -> ValidationUtils.validateWhatsAppNumber(item.getReceiver()));
+        for (int i = 0; i < request.getMessages().size(); i++) {
+            BatchMessageRequest.BatchMessageItem item = request.getMessages().get(i);
+            ValidationUtils.checkNotNull(item, "messages[" + i + "]");
+            ValidationUtils.validateWhatsAppNumber(item.getReceiver());
+        }
         return httpClient.post("/v1/messages/batch", request, idempotencyHeaders(idempotencyKey),
                 BatchMessageResponse.class);
     }
 
     /**
      * Retrieves message details by ID. GET /v1/messages/{id}
+     * The API answers 403 with an empty body when the message belongs to another account, so an
+     * empty 403 here is raised as {@link AraraApiException} with code {@code NOT_FOUND} (status kept 403).
      */
     public MessageResponse getById(String id) {
         ValidationUtils.checkNotNull(id, "id");
-        return httpClient.get("/v1/messages/" + QueryString.encodePathSegment(id), MessageResponse.class);
+        try {
+            return httpClient.get("/v1/messages/" + QueryString.encodePathSegment(id), MessageResponse.class);
+        } catch (AraraAuthException e) {
+            if (e.getStatusCode() != HTTP_FORBIDDEN || e.getErrorDetails() != null) {
+                throw e;
+            }
+            throw new AraraApiException(HTTP_FORBIDDEN, AraraError.builder()
+                    .code(MESSAGE_NOT_FOUND_CODE)
+                    .message("Message " + id + " not found for this API key.")
+                    .build());
+        }
     }
 
     /**
@@ -94,9 +115,12 @@ public class MessageService {
     }
 
     static Map<String, String> idempotencyHeaders(String idempotencyKey) {
-        String key = idempotencyKey == null || idempotencyKey.isBlank()
-                ? UUID.randomUUID().toString()
-                : idempotencyKey;
-        return Map.of(RetryInterceptor.IDEMPOTENCY_KEY_HEADER, key);
+        if (idempotencyKey == null) {
+            return Map.of(RetryInterceptor.IDEMPOTENCY_KEY_HEADER, UUID.randomUUID().toString());
+        }
+        if (idempotencyKey.isBlank()) {
+            throw new AraraException("Idempotency key cannot be blank. Pass null to let the SDK generate one.");
+        }
+        return Map.of(RetryInterceptor.IDEMPOTENCY_KEY_HEADER, idempotencyKey.trim());
     }
 }

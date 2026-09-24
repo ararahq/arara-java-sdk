@@ -22,6 +22,8 @@ import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -188,6 +190,55 @@ class MessageServiceTest extends FakeApi {
         BatchMessageRequest request = BatchMessageRequest.builder().templateName("t").messages(items).build();
 
         assertThrows(AraraException.class, () -> arara.getMessages().sendBatch(request, "k"));
+        assertEquals(0, server.getRequestCount());
+    }
+
+    @Test
+    @DisplayName("should trim the caller key and reject a blank one")
+    void shouldTrimAndRejectBlankKey() throws Exception {
+        respond(202, ACCEPTED);
+
+        arara.getMessages().send(template("5511999998888"), "  order-7  ");
+
+        assertEquals("order-7", take("POST", "/v1/messages").getHeader("Idempotency-Key"));
+        assertThrows(AraraException.class, () -> arara.getMessages().send(template("5511999998888"), "   "));
+        assertEquals(1, server.getRequestCount());
+    }
+
+    @Test
+    @DisplayName("should raise NOT_FOUND on empty 403 from GET /v1/messages/{id}")
+    void shouldMapEmpty403ToNotFound() throws Exception {
+        server.enqueue(new okhttp3.mockwebserver.MockResponse().setResponseCode(403));
+
+        AraraApiException error = assertThrows(AraraApiException.class,
+                () -> arara.getMessages().getById("msg_other"));
+
+        take("GET", "/v1/messages/msg_other");
+        assertFalse(error instanceof com.ararahq.arara.sdk.exceptions.AraraAuthException);
+        assertEquals("NOT_FOUND", error.getCode());
+        assertEquals(403, error.getStatusCode());
+    }
+
+    @Test
+    @DisplayName("should keep 401 on GET /v1/messages/{id} as auth error")
+    void shouldKeep401AsAuth() {
+        server.enqueue(new okhttp3.mockwebserver.MockResponse().setResponseCode(401));
+
+        assertThrows(com.ararahq.arara.sdk.exceptions.AraraAuthException.class,
+                () -> arara.getMessages().getById("msg_1"));
+    }
+
+    @Test
+    @DisplayName("should reject a null batch item with its index")
+    void shouldRejectNullBatchItem() {
+        BatchMessageRequest request = BatchMessageRequest.builder().templateName("t")
+                .messages(java.util.Arrays.asList(
+                        BatchMessageRequest.BatchMessageItem.builder().receiver("5511999998888").build(), null))
+                .build();
+
+        AraraException error = assertThrows(AraraException.class, () -> arara.getMessages().sendBatch(request));
+
+        assertTrue(error.getMessage().contains("messages[1]"));
         assertEquals(0, server.getRequestCount());
     }
 }
