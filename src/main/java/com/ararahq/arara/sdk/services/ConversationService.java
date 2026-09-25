@@ -2,6 +2,7 @@ package com.ararahq.arara.sdk.services;
 
 import com.ararahq.arara.sdk.http.AraraHttpClient;
 import com.ararahq.arara.sdk.models.ConversationReplyRequest;
+import com.ararahq.arara.sdk.utils.QueryString;
 import com.ararahq.arara.sdk.utils.ValidationUtils;
 import com.fasterxml.jackson.core.type.TypeReference;
 
@@ -26,14 +27,13 @@ public class ConversationService {
      * Lists conversations. GET /v1/conversations
      */
     public Map<String, Object> list(String status, String leadStatus, int page, int size) {
-        StringBuilder path = new StringBuilder("/v1/conversations?page=").append(page).append("&size=").append(size);
-        if (status != null) {
-            path.append("&status=").append(status);
-        }
-        if (leadStatus != null) {
-            path.append("&leadStatus=").append(leadStatus);
-        }
-        return httpClient.get(path.toString(), MAP_TYPE);
+        String path = QueryString.create()
+                .add("page", page)
+                .add("size", size)
+                .add("status", status)
+                .add("leadStatus", leadStatus)
+                .appendTo("/v1/conversations");
+        return httpClient.get(path, MAP_TYPE);
     }
 
     /**
@@ -48,7 +48,9 @@ public class ConversationService {
      */
     public Map<String, Object> messages(String conversationId, int page, int size) {
         return httpClient.get(
-                "/v1/conversations/" + conversationId + "/messages?page=" + page + "&size=" + size, MAP_TYPE);
+                QueryString.create().add("page", page).add("size", size)
+                        .appendTo("/v1/conversations/" + QueryString.encodePathSegment(conversationId) + "/messages"),
+                MAP_TYPE);
     }
 
     /**
@@ -64,7 +66,7 @@ public class ConversationService {
      */
     public Map<String, Object> updateStatus(String conversationId, String status) {
         return httpClient.patch(
-                "/v1/conversations/" + conversationId + "/status", Map.of("status", status), MAP_TYPE);
+                "/v1/conversations/" + QueryString.encodePathSegment(conversationId) + "/status", Map.of("status", status), MAP_TYPE);
     }
 
     /**

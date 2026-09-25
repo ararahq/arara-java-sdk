@@ -19,7 +19,8 @@ class AraraTest {
                 .build();
 
         assertNotNull(arara.getMessages());
-        assertNotNull(arara.getUsers());
+        assertNotNull(arara.getAuth());
+        assertNotNull(arara.getOptOuts());
         assertNotNull(arara.getCampaigns());
         assertNotNull(arara.getTemplates());
     }
@@ -45,5 +46,11 @@ class AraraTest {
 
         assertNotNull(arara.getMessages());
         assertNotNull(arara.getCampaigns());
+    }
+
+    @Test
+    @DisplayName("should reject a blank API key")
+    void shouldRejectBlankApiKey() {
+        assertThrows(RuntimeException.class, () -> Arara.builder().apiKey("   ").build());
     }
 }

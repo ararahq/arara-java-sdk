@@ -4,8 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
-  release:
-    types: [created]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -23,23 +26,130 @@ jobs:
         run: ./gradlew build
 
   publish:
-    if: github.event_name == 'release'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(grep '^araraSdkVersion=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+          GROUP=$(grep '^araraSdkGroup=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+          ARTIFACT=$(sed -n "s/^rootProject.name *= *['\"]\([^'\"]*\)['\"].*/\1/p" settings.gradle)
+          if [ -z "$VERSION" ] || [ -z "$GROUP" ] || [ -z "$ARTIFACT" ]; then
+            echo "Could not read version, group or artifactId." >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "group=$GROUP" >> "$GITHUB_OUTPUT"
+          echo "group_path=$(echo "$GROUP" | tr . /)" >> "$GITHUB_OUTPUT"
+          echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Check each destination
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          GROUP: ${{ steps.version.outputs.group }}
+          GROUP_PATH: ${{ steps.version.outputs.group_path }}
+          ARTIFACT: ${{ steps.version.outputs.artifact }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          CENTRAL_URL="https://repo1.maven.org/maven2/$GROUP_PATH/$ARTIFACT/$VERSION/$ARTIFACT-$VERSION.pom"
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$CENTRAL_URL")
+          case "$STATUS" in
+            200) echo "central=false" >> "$GITHUB_OUTPUT" ;;
+            404) echo "central=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "Unexpected status $STATUS from Maven Central." >&2; exit 1 ;;
+          esac
+
+          if VERSIONS=$(gh api "/orgs/ararahq/packages/maven/$GROUP.$ARTIFACT/versions" --paginate --jq '.[].name' 2>/tmp/gh-err); then
+            if echo "$VERSIONS" | grep -qx "$VERSION"; then
+              echo "packages=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "packages=true" >> "$GITHUB_OUTPUT"
+            fi
+          elif grep -q "404" /tmp/gh-err; then
+            echo "packages=true" >> "$GITHUB_OUTPUT"
+          else
+            cat /tmp/gh-err >&2
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "tag=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Fail fast if publishing secrets are missing
+        if: steps.check.outputs.central == 'true' || steps.check.outputs.packages == 'true'
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          MISSING=""
+          for NAME in MAVEN_CENTRAL_USERNAME MAVEN_CENTRAL_PASSWORD GPG_PRIVATE_KEY GPG_PASSPHRASE; do
+            if [ -z "${!NAME}" ]; then
+              MISSING="$MISSING $NAME"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "Missing publishing secrets:$MISSING" >&2
+            exit 1
+          fi
       - name: Set up JDK 17
+        if: steps.check.outputs.central == 'true' || steps.check.outputs.packages == 'true'
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
       - name: Setup Gradle
+        if: steps.check.outputs.central == 'true' || steps.check.outputs.packages == 'true'
         uses: gradle/actions/setup-gradle@v4
-      - name: Publish to GitHub Packages
-        run: ./gradlew publishMavenJavaPublicationToGitHubPackagesRepository
+      - name: Publish signed artifacts in a single Gradle run
+        if: steps.check.outputs.central == 'true' || steps.check.outputs.packages == 'true'
         env:
+          PUBLISH_CENTRAL: ${{ steps.check.outputs.central }}
+          PUBLISH_PACKAGES: ${{ steps.check.outputs.packages }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          TASKS=""
+          if [ "$PUBLISH_CENTRAL" = "true" ]; then
+            TASKS="$TASKS publishAndReleaseToMavenCentral"
+          fi
+          if [ "$PUBLISH_PACKAGES" = "true" ]; then
+            TASKS="$TASKS publishMavenPublicationToGitHubPackagesRepository"
+          fi
+          ./gradlew $TASKS --no-configuration-cache
+      - name: Create tag
+        if: steps.check.outputs.tag == 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git tag "$TAG"
+          git push origin "$TAG"
+      - name: Create GitHub release
+        if: steps.check.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh release create "$TAG" --title "$TAG" --generate-notes

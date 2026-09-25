@@ -5,7 +5,7 @@ import lombok.Value;
 import lombok.extern.jackson.Jacksonized;
 
 /**
- * Basic user information returned by the API.
+ * Owner of the API key, returned by {@code GET /auth/me}.
  */
 @Value
 @Builder
@@ -14,7 +14,5 @@ public class UserResponse {
     String name;
     String email;
     String role;
-    String phoneNumber;
-    String documentNumber;
-    boolean needsInitialOnboarding;
+    boolean emailPending;
 }

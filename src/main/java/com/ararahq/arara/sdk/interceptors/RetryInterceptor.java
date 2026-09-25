@@ -14,18 +14,24 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.Set;
 
 /**
  * Interceptor that retries failed requests with exponential backoff.
  * Retries on network failures, 5xx responses and 429 responses,
  * honoring the Retry-After header when present.
+ * Non-idempotent methods (POST, PATCH) are retried only when the request carries
+ * an {@code Idempotency-Key} header, so a timeout never becomes a duplicated send.
  */
 public class RetryInterceptor implements Interceptor {
     private static final Logger log = LoggerFactory.getLogger(RetryInterceptor.class);
     private static final long INITIAL_BACKOFF_MILLIS = 500L;
     private static final long MAX_BACKOFF_MILLIS = 8_000L;
+    private static final long MAX_RETRY_AFTER_MILLIS = 30_000L;
     private static final int HTTP_TOO_MANY_REQUESTS = 429;
     private static final int HTTP_INTERNAL_SERVER_ERROR = 500;
+    public static final String IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
+    private static final Set<String> IDEMPOTENT_METHODS = Set.of("GET", "HEAD", "OPTIONS", "PUT", "DELETE");
 
     private final int maxRetries;
 
@@ -37,6 +43,9 @@ public class RetryInterceptor implements Interceptor {
     @Override
     public Response intercept(Chain chain) throws IOException {
         Request request = chain.request();
+        if (!isRetrySafe(request)) {
+            return chain.proceed(request);
+        }
 
         for (int attempt = 0; ; attempt++) {
             Response response;
@@ -57,6 +66,11 @@ public class RetryInterceptor implements Interceptor {
             }
 
             long waitMillis = retryDelayMillis(response, attempt);
+            if (waitMillis > MAX_RETRY_AFTER_MILLIS) {
+                log.warn("Retry-After above limit, not retrying. [url={}, status={}, waitMillis={}]",
+                        request.url(), response.code(), waitMillis);
+                return response;
+            }
             log.warn("Received retryable status, retrying. [url={}, status={}, attempt={}, waitMillis={}]",
                     request.url(), response.code(), attempt + 1, waitMillis);
             response.close();
@@ -90,6 +104,17 @@ public class RetryInterceptor implements Interceptor {
         } catch (DateTimeParseException e) {
             return null;
         }
+    }
+
+    /**
+     * @return true when repeating the request cannot create a duplicate side effect.
+     */
+    public static boolean isRetrySafe(Request request) {
+        if (IDEMPOTENT_METHODS.contains(request.method())) {
+            return true;
+        }
+        String key = request.header(IDEMPOTENCY_KEY_HEADER);
+        return key != null && !key.isBlank();
     }
 
     private boolean isRetryable(int statusCode) {

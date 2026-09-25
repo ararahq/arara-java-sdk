@@ -1,123 +1,74 @@
 package com.ararahq.arara.sdk.services;
 
-import com.ararahq.arara.sdk.exceptions.AraraException;
-import com.ararahq.arara.sdk.http.AraraHttpClient;
 import com.ararahq.arara.sdk.models.CreateWhatsAppSmartLinkRequest;
+import com.ararahq.arara.sdk.models.PaginatedResponse;
 import com.ararahq.arara.sdk.models.UpdateWhatsAppSmartLinkRequest;
 import com.ararahq.arara.sdk.models.WhatsAppSmartLinkResponse;
-import com.fasterxml.jackson.core.type.TypeReference;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
-@DisplayName("SmartLinkService Tests")
-class SmartLinkServiceTest {
+@DisplayName("SmartLinkService against fake API")
+class SmartLinkServiceTest extends FakeApi {
+    private static final String ID = "5d0f6c7a-2222-4000-8000-000000000003";
+    private static final String LINK = "{\"id\":\"" + ID + "\",\"name\":\"Loja\",\"code\":\"abc\",\"clicks\":7}";
 
-    private static final String BASE = "/v1/smart-links/whatsapp";
+    @Test
+    @DisplayName("should parse the {data, pagination} envelope of GET /v1/smart-links/whatsapp")
+    void shouldListPaginated() throws Exception {
+        respond(200, "{\"data\":[" + LINK + "],\"pagination\":{\"page\":0,\"size\":50,"
+                + "\"totalElements\":1,\"totalPages\":1}}");
 
-    @Mock
-    private AraraHttpClient httpClient;
+        PaginatedResponse<WhatsAppSmartLinkResponse> page = arara.getSmartLinks().list();
 
-    private SmartLinkService smartLinkService;
-
-    @BeforeEach
-    void setUp() {
-        smartLinkService = new SmartLinkService(httpClient);
+        take("GET", "/v1/smart-links/whatsapp");
+        assertEquals(7, page.getData().get(0).getClicks());
+        assertEquals(1, page.getPagination().getTotalPages());
     }
 
     @Test
-    @DisplayName("should create a smart link")
-    void shouldCreateSmartLink() {
-        CreateWhatsAppSmartLinkRequest request = CreateWhatsAppSmartLinkRequest.builder()
-                .name("Promo")
-                .phoneNumber("+551140001000")
-                .defaultText("Hi")
-                .build();
-        WhatsAppSmartLinkResponse expected = WhatsAppSmartLinkResponse.builder()
-                .id(UUID.randomUUID())
-                .name("Promo")
-                .code("abc123")
-                .build();
-        when(httpClient.post(BASE, request, WhatsAppSmartLinkResponse.class)).thenReturn(expected);
+    @DisplayName("should send page and size")
+    void shouldListWithPage() throws Exception {
+        respond(200, "{\"data\":[],\"pagination\":{\"page\":2,\"size\":5,\"totalElements\":0,\"totalPages\":0}}");
 
-        WhatsAppSmartLinkResponse result = smartLinkService.create(request);
+        arara.getSmartLinks().list(2, 5);
 
-        assertEquals("Promo", result.getName());
-        verify(httpClient, times(1)).post(BASE, request, WhatsAppSmartLinkResponse.class);
+        take("GET", "/v1/smart-links/whatsapp?page=2&size=5");
     }
 
     @Test
-    @DisplayName("should reject null create request")
-    void shouldRejectNullCreate() {
-        assertThrows(AraraException.class, () -> smartLinkService.create(null));
-        verifyNoInteractions(httpClient);
+    @DisplayName("should create, update and read stats")
+    void shouldCreateUpdateAndStats() throws Exception {
+        respond(200, LINK);
+        respond(200, LINK);
+        respond(200, "{\"clicks\":7}");
+
+        arara.getSmartLinks().create(CreateWhatsAppSmartLinkRequest.builder()
+                .name("Loja").phoneNumber("5511999998888").build());
+        arara.getSmartLinks().update(ID, UpdateWhatsAppSmartLinkRequest.builder().name("Loja 2").build());
+        assertEquals(7, arara.getSmartLinks().stats(ID).get("clicks"));
+
+        assertEquals("5511999998888", json(take("POST", "/v1/smart-links/whatsapp")).get("phoneNumber").asText());
+        assertEquals("Loja 2", json(take("PUT", "/v1/smart-links/whatsapp/" + ID)).get("name").asText());
+        take("GET", "/v1/smart-links/whatsapp/" + ID + "/stats");
     }
 
     @Test
-    @DisplayName("should update a smart link via PUT")
-    void shouldUpdateSmartLink() {
-        UpdateWhatsAppSmartLinkRequest request = UpdateWhatsAppSmartLinkRequest.builder()
-                .name("Promo v2")
-                .defaultText("Hello")
-                .build();
-        WhatsAppSmartLinkResponse expected = WhatsAppSmartLinkResponse.builder().name("Promo v2").build();
-        when(httpClient.put(BASE + "/link_1", request, WhatsAppSmartLinkResponse.class)).thenReturn(expected);
+    @DisplayName("should encode id in update and stats paths and reject null id")
+    void shouldEncodeIdAndRejectNull() throws Exception {
+        respond(200, LINK);
+        respond(200, "{}");
 
-        WhatsAppSmartLinkResponse result = smartLinkService.update("link_1", request);
+        arara.getSmartLinks().update("a b/c", UpdateWhatsAppSmartLinkRequest.builder().name("x").build());
+        arara.getSmartLinks().stats("a b/c");
 
-        assertEquals("Promo v2", result.getName());
-        verify(httpClient, times(1)).put(BASE + "/link_1", request, WhatsAppSmartLinkResponse.class);
-    }
-
-    @Test
-    @DisplayName("should reject null update request")
-    void shouldRejectNullUpdate() {
-        assertThrows(AraraException.class, () -> smartLinkService.update("link_1", null));
-        verifyNoInteractions(httpClient);
-    }
-
-    @Test
-    @DisplayName("should list smart links")
-    void shouldListSmartLinks() {
-        List<WhatsAppSmartLinkResponse> expected = Arrays.asList(
-                WhatsAppSmartLinkResponse.builder().name("Promo").build());
-        when(httpClient.get(eq(BASE), any(TypeReference.class))).thenReturn(expected);
-
-        List<WhatsAppSmartLinkResponse> result = smartLinkService.list();
-
-        assertEquals(1, result.size());
-        verify(httpClient, times(1)).get(eq(BASE), any(TypeReference.class));
-    }
-
-    @Test
-    @DisplayName("should return click stats for a smart link")
-    void shouldReturnStats() {
-        Map<String, Object> expected = Map.of("clicks", 42);
-        when(httpClient.get(eq(BASE + "/link_1/stats"), any(TypeReference.class))).thenReturn(expected);
-
-        Map<String, Object> result = smartLinkService.stats("link_1");
-
-        assertNotNull(result);
-        assertEquals(42, result.get("clicks"));
-        verify(httpClient, times(1)).get(eq(BASE + "/link_1/stats"), any(TypeReference.class));
+        take("PUT", "/v1/smart-links/whatsapp/a%20b%2Fc");
+        take("GET", "/v1/smart-links/whatsapp/a%20b%2Fc/stats");
+        assertThrows(RuntimeException.class,
+                () -> arara.getSmartLinks().update(null, UpdateWhatsAppSmartLinkRequest.builder().build()));
+        assertThrows(RuntimeException.class, () -> arara.getSmartLinks().stats(null));
+        assertEquals(2, server.getRequestCount());
     }
 }

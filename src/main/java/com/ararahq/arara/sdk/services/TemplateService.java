@@ -2,18 +2,29 @@ package com.ararahq.arara.sdk.services;
 
 import com.ararahq.arara.sdk.http.AraraHttpClient;
 import com.ararahq.arara.sdk.models.CreateTemplateRequest;
+import com.ararahq.arara.sdk.models.PaginatedResponse;
 import com.ararahq.arara.sdk.models.TemplateResponse;
 import com.ararahq.arara.sdk.models.TemplateStatusResponse;
+import com.ararahq.arara.sdk.utils.QueryString;
 import com.ararahq.arara.sdk.utils.ValidationUtils;
+import com.fasterxml.jackson.core.type.TypeReference;
 
-import java.util.Arrays;
-import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
- * Service for managing WhatsApp templates.
+ * Service for managing WhatsApp templates. Single-template operations take the template id (UUID),
+ * never the name: to find by name, use {@link #list(String, String, Integer, Integer)} with the name filter.
  */
 public class TemplateService {
+    private static final String BASE = "/v1/templates";
+    private static final TypeReference<PaginatedResponse<TemplateResponse>> PAGE_TYPE =
+            new TypeReference<PaginatedResponse<TemplateResponse>>() {
+            };
+    private static final TypeReference<Map<String, Object>> MAP_TYPE =
+            new TypeReference<Map<String, Object>>() {
+            };
+
     private final AraraHttpClient httpClient;
 
     public TemplateService(AraraHttpClient httpClient) {
@@ -21,55 +32,77 @@ public class TemplateService {
     }
 
     /**
-     * Creates and submits a new template to Meta.
-     *
-     * @param request The template definition.
-     * @return The created template details.
+     * Creates and submits a new template to Meta. POST /v1/templates
      */
     public TemplateResponse create(CreateTemplateRequest request) {
         ValidationUtils.checkNotNull(request, "request");
-        return httpClient.post("/v1/templates", request, TemplateResponse.class);
+        return httpClient.post(BASE, request, TemplateResponse.class);
     }
 
     /**
-     * Lists all templates for the authenticated account.
-     *
-     * @return A list of templates.
+     * Lists the first page of templates with the API defaults. GET /v1/templates
      */
-    public List<TemplateResponse> list() {
-        TemplateResponse[] templates = httpClient.get("/v1/templates", TemplateResponse[].class);
-        return templates != null ? Arrays.asList(templates) : List.of();
+    public PaginatedResponse<TemplateResponse> list() {
+        return list(null, null, null, null);
     }
 
     /**
-     * Retrieves a specific template by ID.
+     * Lists templates. GET /v1/templates
      *
-     * @param id The template UUID.
-     * @return Template details.
+     * @param name   Optional name filter.
+     * @param status Optional status filter (e.g. APPROVED).
+     * @param page   Optional zero-based page.
+     * @param size   Optional page size.
+     */
+    public PaginatedResponse<TemplateResponse> list(String name, String status, Integer page, Integer size) {
+        String path = QueryString.create()
+                .add("name", name)
+                .add("status", status)
+                .add("page", page)
+                .add("size", size)
+                .appendTo(BASE);
+        return httpClient.get(path, PAGE_TYPE);
+    }
+
+    /**
+     * Retrieves a template by id. GET /v1/templates/{id}
      */
     public TemplateResponse getById(UUID id) {
         ValidationUtils.checkNotNull(id, "id");
-        return httpClient.get("/v1/templates/" + id, TemplateResponse.class);
+        return httpClient.get(BASE + "/" + id, TemplateResponse.class);
     }
 
     /**
-     * Deletes a template.
-     *
-     * @param id The template UUID.
+     * Deletes a template by id. DELETE /v1/templates/{id}
      */
     public void delete(UUID id) {
         ValidationUtils.checkNotNull(id, "id");
-        httpClient.delete("/v1/templates/" + id);
+        httpClient.delete(BASE + "/" + id);
     }
 
     /**
-     * Checks and refreshes the approval status of a template.
-     *
-     * @param id The template UUID.
-     * @return Current approval status from provider.
+     * Refreshes and returns the approval status of a template. GET /v1/templates/{id}/status
      */
     public TemplateStatusResponse getStatus(UUID id) {
         ValidationUtils.checkNotNull(id, "id");
-        return httpClient.get("/v1/templates/" + id + "/status", TemplateStatusResponse.class);
+        return httpClient.get(BASE + "/" + id + "/status", TemplateStatusResponse.class);
+    }
+
+    /**
+     * Aggregated analytics of all templates. GET /v1/templates/analytics
+     *
+     * @param period Optional window (e.g. 7d, 30d); API default is 30d.
+     */
+    public Map<String, Object> analytics(String period) {
+        return httpClient.get(QueryString.create().add("period", period).appendTo(BASE + "/analytics"), MAP_TYPE);
+    }
+
+    /**
+     * Analytics of one template. GET /v1/templates/{id}/analytics
+     */
+    public Map<String, Object> analytics(UUID id, String period) {
+        ValidationUtils.checkNotNull(id, "id");
+        return httpClient.get(
+                QueryString.create().add("period", period).appendTo(BASE + "/" + id + "/analytics"), MAP_TYPE);
     }
 }

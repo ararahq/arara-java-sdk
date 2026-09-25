@@ -9,6 +9,7 @@ import com.ararahq.arara.sdk.models.ContactsBatchResponse;
 import com.ararahq.arara.sdk.models.ContactsListResponse;
 import com.ararahq.arara.sdk.models.ContactsReactivationResponse;
 import com.ararahq.arara.sdk.models.ContactsStatsResponse;
+import com.ararahq.arara.sdk.utils.QueryString;
 import com.ararahq.arara.sdk.utils.ValidationUtils;
 import com.fasterxml.jackson.core.type.TypeReference;
 
@@ -29,14 +30,13 @@ public class ContactService {
      * Lists contacts. GET /v1/contacts
      */
     public ContactsListResponse list(int page, int size, String query, String lifecycle) {
-        StringBuilder path = new StringBuilder("/v1/contacts?page=").append(page).append("&size=").append(size);
-        if (query != null) {
-            path.append("&q=").append(query);
-        }
-        if (lifecycle != null) {
-            path.append("&lifecycle=").append(lifecycle);
-        }
-        return httpClient.get(path.toString(), ContactsListResponse.class);
+        String path = QueryString.create()
+                .add("page", page)
+                .add("size", size)
+                .add("q", query)
+                .add("lifecycle", lifecycle)
+                .appendTo("/v1/contacts");
+        return httpClient.get(path, ContactsListResponse.class);
     }
 
     /**
@@ -73,7 +73,7 @@ public class ContactService {
      * Retrieves a contact by phone. GET /v1/contacts/{phone}
      */
     public ContactResponse get(String phone) {
-        return httpClient.get("/v1/contacts/" + phone, ContactResponse.class);
+        return httpClient.get("/v1/contacts/" + QueryString.encodePathSegment(phone), ContactResponse.class);
     }
 
     /**
@@ -81,13 +81,13 @@ public class ContactService {
      */
     public ContactResponse update(String phone, ContactPatchRequest request) {
         ValidationUtils.checkNotNull(request, "request");
-        return httpClient.patch("/v1/contacts/" + phone, request, ContactResponse.class);
+        return httpClient.patch("/v1/contacts/" + QueryString.encodePathSegment(phone), request, ContactResponse.class);
     }
 
     /**
      * Lists recent messages for a contact. GET /v1/contacts/{phone}/messages
      */
     public ContactMessagesResponse messages(String phone, int limit) {
-        return httpClient.get("/v1/contacts/" + phone + "/messages?limit=" + limit, ContactMessagesResponse.class);
+        return httpClient.get("/v1/contacts/" + QueryString.encodePathSegment(phone) + "/messages?limit=" + limit, ContactMessagesResponse.class);
     }
 }

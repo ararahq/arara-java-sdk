@@ -5,12 +5,14 @@ import lombok.Value;
 import lombok.extern.jackson.Jacksonized;
 
 /**
- * Payload for updating user profile information.
+ * Pagination metadata of a {@link PaginatedResponse}.
  */
 @Value
 @Builder
 @Jacksonized
-public class UpdateUserRequest {
-    String name;
-    String phoneNumber;
+public class Pagination {
+    int page;
+    int size;
+    long totalElements;
+    int totalPages;
 }
