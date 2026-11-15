@@ -95,7 +95,7 @@ mavenPublishing {
 
     pom {
         name = 'Arara Java SDK'
-        description = 'Official Java SDK for the Arara WhatsApp messaging API'
+        description = 'SDK Java da API da AraraHQ. AraraHQ: WhatsApp para empresas brasileiras, com atendimento em equipe com IA, campanhas para a base e sistemas conectados pela API.'
         inceptionYear = '2025'
         url = 'https://github.com/ararahq/arara-java-sdk'
         licenses {

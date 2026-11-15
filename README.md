@@ -4,7 +4,9 @@
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![Docs](https://img.shields.io/badge/Docs-docs.ararahq.com-orange)](https://docs.ararahq.com)
 
-SDK oficial em Java para a API de mensagens WhatsApp da **Arara**.
+SDK oficial em Java para a API da **[AraraHQ](https://ararahq.com)**.
+
+AraraHQ: WhatsApp para empresas brasileiras, com atendimento em equipe com IA, campanhas para a base e sistemas conectados pela API.
 
 ## Requisitos
 
